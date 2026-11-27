@@ -34,7 +34,7 @@ add-note Pick up balloons on Friday
 add-note "Pick up balloons on Friday"
 ```
 
-Unknown commands, invalid arguments, and unclosed double quotation marks display an error message without stopping the assistant.
+Invalid input displays an error without stopping the assistant. For a likely typo such as `brithdays 7`, it suggests `birthdays 7`. A phrase such as `find a contact` suggests `search-contact`.
 
 ### Browser
 
@@ -91,6 +91,9 @@ Birthday congratulations that fall on a weekend are moved to the following Monda
 | `delete-note 1` | Delete note 1 |
 | `pin-note 1` | Pin note 1 |
 | `unpin-note 1` | Unpin note 1 |
+| `add-tag 1 project` | Add a single-word tag to note 1. Repeat to add another tag |
+| `search-tag project` | Find notes by a tag, ignoring case |
+| `sort-notes-by-tag` | Sort by each note's first tag alphabetically, with untagged notes last |
 
 ### System commands
 
@@ -121,7 +124,7 @@ The following data is saved:
 - Addresses and email addresses
 - Birthdays
 - Favorite contacts
-- Notes and pinned notes
+- Notes, tags, and pins
 - Note IDs and the next available note ID
 
 Data is saved when the user enters `exit` or `close`, presses Ctrl+C, or sends an end-of-file signal at the command prompt.

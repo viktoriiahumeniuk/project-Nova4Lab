@@ -3,6 +3,7 @@ import re
 from pathlib import Path
 from collections import UserDict
 from datetime import date, datetime, timedelta
+from difflib import get_close_matches
 from functools import wraps
 
 
@@ -70,10 +71,18 @@ class Birthday(Field):
         return f"{self.value:%d.%m}.{self.value.year:04d}"
 
 
+def normalize_note_tag(tag):
+    tag = tag.strip().casefold()
+    if not tag or any(char.isspace() for char in tag):
+        raise ValueError("A tag must be a single word.")
+    return tag
+
+
 class Note:
     def __init__(self, note_id, text):
         self.id = note_id
         self.pinned = False
+        self.tags = set()
         self.edit(text)
 
     def edit(self, text):
@@ -82,9 +91,19 @@ class Note:
             raise ValueError("Note text cannot be empty.")
         self.text = text
 
+    def add_tag(self, tag):
+        self.tags.add(normalize_note_tag(tag))
+
+    def __setstate__(self, state):
+        # Notes saved before tags were introduced have no "tags" field.
+        self.__dict__.update(state)
+        self.__dict__.setdefault("tags", set())
+
     def __str__(self):
         marker = "[Pinned] " if self.pinned else ""
-        return f"{marker}#{self.id} {self.text}"
+        tags = ", ".join(sorted(self.tags))
+        suffix = f" [Tags: {tags}]" if tags else ""
+        return f"{marker}#{self.id} {self.text}{suffix}"
 
 
 class NoteBook:
@@ -122,6 +141,16 @@ class NoteBook:
             note for note in self.list_notes()
             if query in note.text.casefold()
         ]
+
+    def search_by_tag(self, tag):
+        tag = normalize_note_tag(tag)
+        return [note for note in self.list_notes() if tag in note.tags]
+
+    def sort_by_tags(self):
+        return sorted(
+            self.notes.values(),
+            key=lambda note: (not note.tags, min(note.tags, default=""), note.id),
+        )
 
     def delete(self, note_id):
         note = self.get(note_id)
@@ -588,6 +617,29 @@ def unpin_note(args, notebook):
     note.pinned = False
     return f"Note #{note.id} unpinned."
 
+
+@input_error
+def tag_note(args, notebook):
+    require_args(args, 2, "add-tag [id] [tag]")
+    note = notebook.get(args[0])
+    note.add_tag(args[1])
+    return f"Tag added to note #{note.id}."
+
+
+@input_error
+def search_note_tag(args, notebook):
+    require_args(args, 1, "search-tag [tag]")
+    notes = notebook.search_by_tag(args[0])
+    return "\n".join(str(note) for note in notes) or "No matching notes."
+
+
+@input_error
+def sort_notes_by_tag(args, notebook):
+    require_args(args, 0, "sort-notes-by-tag")
+    notes = notebook.sort_by_tags()
+    return "\n".join(str(note) for note in notes) or "No notes yet."
+
+
 def remove_note_quotes(text):
     if text.startswith('"') and text.endswith('"'):
         return text[1:-1]
@@ -619,7 +671,7 @@ def parse_input(user_input):
             remove_note_quotes(address.strip())
         ]
 
-    if command == "edit-note":
+    if command in ("edit-note", "add-tag", "tag-note"):
         args = re.split(r"\s*,\s*|\s+", text, maxsplit=1)
         return command, [remove_note_quotes(arg) for arg in args]
 
@@ -640,6 +692,31 @@ def parse_input(user_input):
         return command, args
 
     return command, [remove_note_quotes(text)]
+
+
+def suggest_command(user_input, known_commands):
+    """Suggest a command and keep its arguments as entered."""
+    words = user_input.strip().split(maxsplit=1)
+    if not words:
+        return None
+
+    phrase_commands = {
+        "find a contact": "search-contact",
+        "find a note": "search-note",
+        "add a contact": "add-contact",
+        "add a note": "add-note",
+    }
+    phrase = " ".join(user_input.casefold().split())
+    if phrase in phrase_commands:
+        return phrase_commands[phrase]
+
+    matches = get_close_matches(
+        words[0].casefold(), known_commands, n=1, cutoff=0.65
+    )
+    if not matches:
+        return None
+    return " ".join([matches[0], *words[1:]])
+
 
 def show_help():
     print("""
@@ -677,6 +754,9 @@ edit-note id, new_text
 delete-note id
 pin-note id
 unpin-note id
+add-tag id tag
+search-tag tag
+sort-notes-by-tag
 
 SYSTEM COMMANDS
 
@@ -693,13 +773,47 @@ Double quotation marks are optional.
 
 def main():
     book, notebook = load_data()
+    handlers = {
+        "add-user": (add_user, book),
+        "add-contact": (add_contact, book),
+        "change": (change_contact, book),
+        "set-address": (set_address, book),
+        "set-email": (set_email, book),
+        "rename-contact": (rename_contact, book),
+        "delete-contact": (delete_contact, book),
+        "phone": (show_phone, book),
+        "all": (show_all, book),
+        "show-contact": (show_contact, book),
+        "remove-phone": (remove_phone, book),
+        "favorite": (favorite_contact, book),
+        "unfavorite": (unfavorite_contact, book),
+        "favorites": (show_favorites, book),
+        "search-contact": (search_contact, book),
+        "add-birthday": (add_birthday, book),
+        "show-birthday": (show_birthday, book),
+        "birthdays": (birthdays, book),
+        "add-note": (add_note, notebook),
+        "search-note": (search_note, notebook),
+        "edit-note": (edit_note, notebook),
+        "delete-note": (delete_note, notebook),
+        "list-notes": (list_notes, notebook),
+        "pin-note": (pin_note, notebook),
+        "unpin-note": (unpin_note, notebook),
+        "add-tag": (tag_note, notebook),
+        "search-tag": (search_note_tag, notebook),
+        "sort-notes-by-tag": (sort_notes_by_tag, notebook),
+    }
+    known_commands = (*handlers, "hello", "help", "exit", "close")
+    handlers["tag-note"] = handlers["add-tag"]
+    handlers["search-note-tag"] = handlers["search-tag"]
 
     print("Welcome to the Nova4Lab assistant bot!")
     show_help()
 
     while True:
         try:
-            command, args = parse_input(input("Enter a command: "))
+            user_input = input("Enter a command: ")
+            command, args = parse_input(user_input)
         except ValueError as error:
             print(error)
             continue
@@ -723,83 +837,16 @@ def main():
         elif command == "help":
             show_help()
 
-        elif command == "add-user":
-            print(add_user(args, book))
-
-        elif command == "add-contact":
-            print(add_contact(args, book))
-
-        elif command == "change":
-            print(change_contact(args, book))
-
-        elif command == "set-address":
-            print(set_address(args, book))
-
-        elif command == "set-email":
-            print(set_email(args, book))
-
-        elif command == "rename-contact":
-            print(rename_contact(args, book))
-
-        elif command == "delete-contact":
-            print(delete_contact(args, book))
-
-        elif command == "phone":
-            print(show_phone(args, book))
-
-        elif command == "all":
-            print(show_all(args, book))
-
-        elif command == "show-contact":
-            print(show_contact(args, book))
-
-        elif command == "remove-phone":
-            print(remove_phone(args, book))
-
-        elif command == "favorite":
-            print(favorite_contact(args, book))
-
-        elif command == "unfavorite":
-            print(unfavorite_contact(args, book))
-
-        elif command == "favorites":
-            print(show_favorites(args, book))
-
-        elif command == "search-contact":
-            print(search_contact(args, book))
-
-        elif command == "add-birthday":
-            print(add_birthday(args, book))
-
-        elif command == "show-birthday":
-            print(show_birthday(args, book))
-
-        elif command == "birthdays":
-            print(birthdays(args, book))
-
-        elif command == "add-note":
-            print(add_note(args, notebook))
-
-        elif command == "search-note":
-            print(search_note(args, notebook))
-
-        elif command == "edit-note":
-            print(edit_note(args, notebook))
-
-        elif command == "delete-note":
-            print(delete_note(args, notebook))
-
-        elif command == "list-notes":
-            print(list_notes(args, notebook))
-
-        elif command == "pin-note":
-            print(pin_note(args, notebook))
-
-        elif command == "unpin-note":
-            print(unpin_note(args, notebook))
+        elif command in handlers:
+            handler, collection = handlers[command]
+            print(handler(args, collection))
 
         else:
-            print("Invalid command. Type 'help' for available commands.")
+            suggestion = suggest_command(user_input, known_commands)
+            if suggestion:
+                print(f"Invalid command. Did you mean '{suggestion}'?")
+            else:
+                print("Invalid command. Type 'help' for available commands.")
 
 
 if __name__ == "__main__":
