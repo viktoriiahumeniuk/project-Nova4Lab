@@ -33,6 +33,12 @@ class Phone(Field):
 
         super().__init__(value)
 
+class Email(Field):
+    def __init__(self, value):
+        if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", value):
+            raise ValueError("Invalid email address.")
+
+        super().__init__(value)
 
 class Address(Field):
     def __init__(self, value):
@@ -215,6 +221,23 @@ class AddressBook(UserDict):
         del self.data[old_name]
         record.name = updated_name
         self.add_record(record)
+
+    def search_contacts(self, query):
+        query = query.strip().lower()
+        results = []
+
+    if not query:
+        return results
+
+    for record in self.data.values():
+        name_match = query in record.name.value.lower()
+        phone_match = any(query == phone.value for phone in record.phones)
+        email_match = record.email is not None and query == record.email.value.lower()
+
+        if name_match or phone_match or email_match:
+            results.append(record)
+
+    return results    
 
     def get_upcoming_birthdays(self):
         today = date.today()
