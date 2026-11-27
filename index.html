@@ -85,6 +85,12 @@
     textarea { resize: vertical; }
     #favorites-only { margin-top: .65rem; }
     #favorites-only[hidden] { display: none; }
+    .filters { display: flex; flex-wrap: wrap; align-items: end; gap: .65rem; margin-top: .65rem; }
+    .filters[hidden] { display: none; }
+    .filters label { display: grid; gap: .25rem; flex: 1 1 10rem; }
+    .filters select { font: inherit; padding: .67rem .8rem; border: 1px solid #bdcec1; border-radius: .6rem; background: white; color: inherit; }
+    .tags { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .6rem; }
+    .tag { padding: .12rem .52rem; border-radius: 1rem; background: #e8f1e9; color: var(--accent); font-size: .82rem; }
     #records {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
@@ -140,17 +146,33 @@
       <nav aria-label="Workspace">
         <button type="button" id="contacts-tab" aria-pressed="true" disabled>Contacts</button>
         <button type="button" id="notes-tab" aria-pressed="false" disabled>Notes</button>
+        <button type="button" id="birthdays-tab" aria-pressed="false" disabled>Birthdays</button>
       </nav>
       <div class="panel">
         <div class="row">
           <h2 id="section-title">Contacts</h2>
           <button type="button" class="primary" id="add" disabled>+ New contact</button>
         </div>
-        <label id="search-label" for="search">Search contacts</label>
-        <input id="search" type="search" disabled>
+        <div id="search-controls">
+          <label id="search-label" for="search">Search contacts</label>
+          <input id="search" type="search" disabled>
+        </div>
         <button type="button" class="secondary" id="favorites-only" aria-pressed="false" hidden>
           Favorites only
         </button>
+        <div class="filters" id="note-filters" hidden>
+          <label>Tag <input id="tag-filter" placeholder="Exact tag, e.g. party"></label>
+          <label>Sort notes
+            <select id="note-order">
+              <option value="pinned">Pinned first</option>
+              <option value="tag">By tag</option>
+            </select>
+          </label>
+        </div>
+        <form class="filters" id="birthday-filters" hidden>
+          <label>Days ahead <input id="birthday-days" inputmode="numeric" placeholder="Blank for the next 7 days"></label>
+          <button type="submit" class="secondary">Show birthdays</button>
+        </form>
         <div id="records"></div>
         <p id="status" role="status">Loading assistant…</p>
       </div>
@@ -178,6 +200,7 @@
   </template>
   <template id="note-fields">
     <label>Note<textarea name="text" required rows="5"></textarea></label>
+    <label>Tags (comma-separated)<input name="tags" placeholder="party, supplies"></label>
   </template>
 
 <script type="text/plain" id="python-bridge">
@@ -212,24 +235,81 @@ def contact_data(record):
     }
 
 
-def web_request(raw):
-    request = json.loads(raw)
-    state = request["state"]
+def note_data(note):
+    return {
+        "id": note.id,
+        "text": note.text,
+        "pinned": note.pinned,
+        "tags": sorted(note.tags),
+    }
+
+
+def restore_web_data(state):
     book = AddressBook()
     notebook = NoteBook()
+    try:
+        contacts, notes = state["contacts"], state["notes"]
+        if not isinstance(contacts, list) or not isinstance(notes, list):
+            raise ValueError
+        for fields in contacts:
+            record = make_contact(fields)
+            if book.find(record.name.value) is not None:
+                raise ValueError
+            book.add_record(record)
+        for item in notes:
+            note_id = item["id"]
+            if type(note_id) is not int or note_id < 1 or note_id in notebook.notes:
+                raise ValueError
+            note = Note(note_id, item["text"])
+            note.pinned = item.get("pinned", False)
+            for tag in item.get("tags", []):
+                note.add_tag(tag)
+            notebook.notes[note.id] = note
+        minimum_id = max(notebook.notes, default=0) + 1
+        next_id = state.get("next_id", minimum_id)
+        if type(next_id) is not int:
+            raise ValueError
+        notebook.next_id = max(next_id, minimum_id)
+    except (AttributeError, KeyError, TypeError, ValueError):
+        raise ValueError(
+            "Stored browser data has an invalid format and was left untouched."
+        ) from None
+    return book, notebook
 
-    for fields in state["contacts"]:
-        book.add_record(make_contact(fields))
-    for item in state["notes"]:
-        note = Note(item["id"], item["text"])
-        note.pinned = item.get("pinned", False)
-        notebook.notes[note.id] = note
-    notebook.next_id = state["next_id"]
 
+def browse_records(book, notebook, data):
+    section = data["section"]
+    if section == "birthdays":
+        return birthday_results(book, data["days"])
+    if section == "contacts":
+        records = book.search_contacts(data["query"]) if data["query"] else book.values()
+        records = sorted(records, key=lambda record: not record.favorite)
+        return [
+            contact_data(record) for record in records
+            if not data["favorites_only"] or record.favorite
+        ]
+
+    query = data["query"]
+    tag = data["tag"]
+    text_matches = {note.id for note in notebook.search(query)} if query else None
+    tag_matches = {note.id for note in notebook.search_by_tag(tag)} if tag else None
+    notes = notebook.sort_by_tags() if data["order"] == "tag" else notebook.list_notes()
+    return [
+        note_data(note) for note in notes
+        if (text_matches is None or note.id in text_matches)
+        and (tag_matches is None or note.id in tag_matches)
+    ]
+
+
+def web_request(raw):
+    request = json.loads(raw)
     data = request["data"]
     action = request["action"]
 
     try:
+        book, notebook = restore_web_data(request["state"])
+        if action == "browse":
+            return json.dumps({"items": browse_records(book, notebook, data)})
         if action == "save_contact":
             record = make_contact(data["fields"])
             original = data["original"]
@@ -253,9 +333,12 @@ def web_request(raw):
                 raise ValueError("Phone number was not found.")
         elif action == "save_note":
             if data["id"] is None:
-                notebook.add(data["text"])
+                note = notebook.add(data["text"])
             else:
-                notebook.get(str(data["id"])).edit(data["text"])
+                note = notebook.get(str(data["id"]))
+                note.edit(data["text"])
+            if "tags" in data:
+                note.tags = {normalize_note_tag(tag) for tag in data["tags"]}
         elif action == "delete_note":
             notebook.delete(str(data["id"]))
         elif action == "toggle_pin":
@@ -268,10 +351,7 @@ def web_request(raw):
 
     return json.dumps({"state": {
         "contacts": [contact_data(record) for record in book.values()],
-        "notes": [
-            {"id": note.id, "text": note.text, "pinned": note.pinned}
-            for note in notebook.notes.values()
-        ],
+        "notes": [note_data(note) for note in notebook.notes.values()],
         "next_id": notebook.next_id,
     }})
 </script>
@@ -285,7 +365,7 @@ const emptyState = { contacts: [], notes: [], next_id: 1 };
 const search = get("search");
 const dialog = get("editor");
 const form = get("editor-form");
-let runtime, request, state, editing;
+let request, state, editing, storageSnapshot;
 let section = "contacts";
 let favoritesOnly = false;
 
@@ -303,11 +383,25 @@ function button(label, action, className) {
   return item;
 }
 
-function send(action, data = {}, current = state) {
+function callPython(action, data, current) {
   const result = JSON.parse(request(JSON.stringify({ action, data, state: current })));
   if (result.error) throw new Error(result.error);
+  return result;
+}
+
+function send(action, data = {}, current = state) {
+  const result = callPython(action, data, current);
   if (action !== "load") {
-    localStorage.setItem(storageKey, JSON.stringify(result.state));
+    if (localStorage.getItem(storageKey) !== storageSnapshot) {
+      throw new Error("Data changed in another tab. Reload the page before saving.");
+    }
+    const nextSnapshot = JSON.stringify(result.state);
+    try {
+      localStorage.setItem(storageKey, nextSnapshot);
+    } catch {
+      throw new Error("Could not save to browser storage. Your previous data is unchanged.");
+    }
+    storageSnapshot = nextSnapshot;
   }
   state = result.state;
 }
@@ -366,6 +460,12 @@ function renderRecord(record, isContact) {
     if (details.children.length) card.append(details);
   } else {
     card.append(node("p", record.text));
+    if (record.tags.length) {
+      const tags = node("div", "", "tags");
+      tags.setAttribute("aria-label", "Tags");
+      for (const tag of record.tags) tags.append(node("span", tag, "tag"));
+      card.append(tags);
+    }
   }
 
   const toggleLabel = isContact
@@ -389,36 +489,53 @@ function renderRecord(record, isContact) {
   return card;
 }
 
+function renderBirthday(record) {
+  const card = node("article", "", "card");
+  card.append(node("h3", record.name), node("p", "Birthday: " + record.birthday_date));
+  if (record.congratulation_date !== record.birthday_date) {
+    card.append(node("p", "Congratulate on " + record.congratulation_date));
+  }
+  return card;
+}
+
 function render() {
   const isContact = section === "contacts";
-  const query = search.value.trim().toLowerCase();
-  const shown = state[section].filter((item) => {
-    if (isContact && favoritesOnly && !item.favorite) return false;
-    const fields = isContact
-      ? [item.name, item.email, item.address, ...item.phones]
-      : [item.text];
-    return fields.some((value) => value.toLowerCase().includes(query));
-  }).sort((left, right) => {
-    const key = isContact ? "favorite" : "pinned";
-    return Number(right[key]) - Number(left[key]);
-  });
-
+  const isNote = section === "notes";
+  const isBirthday = section === "birthdays";
+  const query = search.value.trim();
+  const tag = get("tag-filter").value.trim();
   get("favorites-only").hidden = !isContact;
   get("favorites-only").setAttribute("aria-pressed", favoritesOnly);
   get("contacts-tab").setAttribute("aria-pressed", isContact);
-  get("notes-tab").setAttribute("aria-pressed", !isContact);
-  get("section-title").textContent = isContact ? "Contacts" : "Notes";
-  get("search-label").textContent = isContact ? "Search contacts" : "Search notes";
+  get("notes-tab").setAttribute("aria-pressed", isNote);
+  get("birthdays-tab").setAttribute("aria-pressed", isBirthday);
+  get("section-title").textContent = isContact ? "Contacts" : isNote ? "Notes" : "Birthdays";
+  get("search-controls").hidden = isBirthday;
+  get("search-label").textContent = isContact ? "Search by name, phone, or email" : "Search notes";
+  get("note-filters").hidden = !isNote;
+  get("birthday-filters").hidden = !isBirthday;
+  get("add").hidden = isBirthday;
   get("add").textContent = isContact ? "+ New contact" : "+ New note";
 
   const singular = isContact ? "contact" : "note";
-  const message = query || (isContact && favoritesOnly)
-    ? "No matching " + section + "."
-    : "No " + section + " yet. Add your first " + singular + ".";
+  let message = "No " + section + " yet. Add your first " + singular + ".";
+  if (query || (isContact && favoritesOnly) || (isNote && tag)) {
+    message = "No matching " + section + ".";
+  }
+  if (isBirthday) message = "No upcoming birthdays for this selection.";
 
-  get("records").replaceChildren(...(shown.length
-    ? shown.map((item) => renderRecord(item, isContact))
-    : [node("p", message, "empty")]));
+  try {
+    const { items } = callPython("browse", {
+      section, query, tag,
+      order: get("note-order").value,
+      days: get("birthday-days").value.trim(),
+      favorites_only: favoritesOnly,
+    }, state);
+    const cards = items.map((item) => isBirthday ? renderBirthday(item) : renderRecord(item, isContact));
+    get("records").replaceChildren(...(cards.length ? cards : [node("p", message, "empty")]));
+  } catch (error) {
+    get("records").replaceChildren(node("p", error.message, "empty"));
+  }
 }
 
 function openEditor(record = null) {
@@ -431,7 +548,8 @@ function openEditor(record = null) {
 
   if (record) {
     for (const input of get("fields").querySelectorAll("[name]")) {
-      input.value = input.name === "phones" ? record.phones.join(", ") : record[input.name];
+      const value = record[input.name];
+      input.value = Array.isArray(value) ? value.join(", ") : value;
     }
   }
   get("error").textContent = "";
@@ -451,7 +569,8 @@ form.addEventListener("submit", (event) => {
         : [];
       send("save_contact", { fields, original: editing ? editing.name : null });
     } else {
-      send("save_note", { id: editing ? editing.id : null, text: fields.text });
+      const tags = fields.tags ? fields.tags.split(",").map((tag) => tag.trim()) : [];
+      send("save_note", { id: editing ? editing.id : null, text: fields.text, tags });
     }
     dialog.close();
     render();
@@ -464,13 +583,19 @@ form.addEventListener("submit", (event) => {
 get("add").addEventListener("click", () => openEditor());
 get("cancel").addEventListener("click", () => dialog.close());
 search.addEventListener("input", render);
+get("tag-filter").addEventListener("input", render);
+get("note-order").addEventListener("change", render);
+get("birthday-filters").addEventListener("submit", (event) => {
+  event.preventDefault();
+  render();
+});
 
 get("favorites-only").addEventListener("click", () => {
   favoritesOnly = !favoritesOnly;
   render();
 });
 
-for (const tab of ["contacts", "notes"]) {
+for (const tab of ["contacts", "notes", "birthdays"]) {
   get(tab + "-tab").addEventListener("click", () => {
     section = tab;
     search.value = "";
@@ -486,16 +611,24 @@ window.addEventListener("DOMContentLoaded", async () => {
       throw new Error("Place index.html and main.py in the same published folder.");
     }
 
-    runtime = await loadPyodide();
+    const runtime = await loadPyodide();
     runtime.globals.set("__name__", "nova_lab_cli");
     runtime.runPython(await response.text());
     runtime.runPython(get("python-bridge").textContent);
     request = runtime.globals.get("web_request");
 
-    const saved = localStorage.getItem(storageKey);
-    send("load", {}, saved ? JSON.parse(saved) : emptyState);
+    storageSnapshot = localStorage.getItem(storageKey);
+    let savedState = emptyState;
+    if (storageSnapshot !== null) {
+      try {
+        savedState = JSON.parse(storageSnapshot);
+      } catch {
+        throw new Error("Stored browser data has an invalid format and was left untouched.");
+      }
+    }
+    send("load", {}, savedState);
 
-    for (const id of ["contacts-tab", "notes-tab", "search", "add"]) {
+    for (const id of ["contacts-tab", "notes-tab", "birthdays-tab", "search", "add"]) {
       get(id).disabled = false;
     }
     get("status").textContent = "";
