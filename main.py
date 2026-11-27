@@ -95,7 +95,7 @@ class Note:
         self.tags.add(normalize_note_tag(tag))
 
     def __setstate__(self, state):
-        # Notes saved before tags were introduced have no "tags" field.
+        """Restore a saved note and supply tags for older records."""
         self.__dict__.update(state)
         self.__dict__.setdefault("tags", set())
 
@@ -147,6 +147,7 @@ class NoteBook:
         return [note for note in self.list_notes() if tag in note.tags]
 
     def sort_by_tags(self):
+        """Sort by the first tag alphabetically, with untagged notes last."""
         return sorted(
             self.notes.values(),
             key=lambda note: (not note.tags, min(note.tags, default=""), note.id),
@@ -168,7 +169,7 @@ class Record:
         self.favorite = False
 
     def __setstate__(self, state):
-        # Older address books may lack these fields.
+        """Restore a saved contact with defaults for older records."""
         self.favorite = False
         self.address = None
         self.email = None
@@ -238,6 +239,7 @@ class AddressBook(UserDict):
         self.data.pop(name, None)
 
     def rename(self, old_name, new_name):
+        """Update the contact name and its dictionary key."""
         record = self.find(old_name)
         if record is None:
             raise ValueError(f"Contact '{old_name}' was not found.")
@@ -253,6 +255,7 @@ class AddressBook(UserDict):
         self.add_record(record)
 
     def search_contacts(self, query):
+        """Find matches by part of a name or by an exact phone or email."""
         query = query.strip().lower()
         results = []
 
@@ -275,6 +278,11 @@ class AddressBook(UserDict):
         return results    
 
     def get_upcoming_birthdays(self, days=None):
+        """Find birthdays on a date or in the default seven-day window.
+
+        Use the actual birthday for matching. Move weekend reminders
+        to Monday and include both dates in the result.
+        """
         today = date.today()
         upcoming_birthdays = []
 
@@ -314,7 +322,7 @@ class AddressBook(UserDict):
                 congratulation_date += timedelta(days=1)
 
             upcoming_birthdays.append(
-                (congratulation_date, record.name.value)
+                (congratulation_date, record.name.value, next_birthday)
             )
 
         upcoming_birthdays.sort()
@@ -323,8 +331,9 @@ class AddressBook(UserDict):
             {
                 "name": name,
                 "congratulation_date": congratulation_date.strftime("%Y.%m.%d"),
+                "birthday_date": next_birthday.strftime("%Y.%m.%d"),
             }
-            for congratulation_date, name in upcoming_birthdays
+            for congratulation_date, name, next_birthday in upcoming_birthdays
         ]
 
 
@@ -333,6 +342,7 @@ DATA_FILE = DATA_DIR / "data.pkl"
 
 
 def save_data(book, notebook):
+    """Save contacts and notes together in the user's home folder."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     with open(DATA_FILE, "wb") as file:
@@ -340,14 +350,25 @@ def save_data(book, notebook):
 
 
 def load_data():
+    """Load both collections or start empty if the file is missing."""
     try:
         with open(DATA_FILE, "rb") as file:
-            return pickle.load(file)
+            data = pickle.load(file)
     except FileNotFoundError:
         return AddressBook(), NoteBook()
 
+    if (
+        not isinstance(data, tuple)
+        or len(data) != 2
+        or not isinstance(data[0], AddressBook)
+        or not isinstance(data[1], NoteBook)
+    ):
+        raise ValueError("Expected saved contacts and notes.")
+    return data
+
 
 def input_error(func):
+    """Turn a command's validation error into a message for the user."""
     @wraps(func)
     def wrapper(args, book):
         try:
@@ -535,27 +556,25 @@ def show_birthday(args, book):
     return f"{record.name}: {record.birthday}"
 
 
+def birthday_results(book, days_text=""):
+    """Validate the day offset and return results for the CLI and website."""
+    if days_text and (not days_text.isascii() or not days_text.isdecimal()):
+        raise ValueError("Number of days must be a non-negative integer.")
+
+    try:
+        days = int(days_text) if days_text else None
+        date.today() + timedelta(days=days or 0)
+        return book.get_upcoming_birthdays(days)
+    except (ValueError, OverflowError):
+        raise ValueError("Number of days is too large.") from None
+
+
 @input_error
 def birthdays(args, book):
     if len(args) > 1:
         return "Usage: birthdays [days]"
 
-    days = None
-
-    if args:
-        if not args[0].isascii() or not args[0].isdecimal():
-            return "Number of days must be a non-negative integer."
-
-        try:
-            days = int(args[0])
-            date.today() + timedelta(days=days)
-        except (ValueError, OverflowError):
-            return "Number of days is too large."
-
-    try:
-        upcoming = book.get_upcoming_birthdays(days)
-    except OverflowError:
-        return "Number of days is too large."
+    upcoming = birthday_results(book, args[0] if args else "")
 
     if not upcoming:
         return "No upcoming birthdays."
@@ -646,6 +665,11 @@ def remove_note_quotes(text):
     return text
 
 def parse_input(user_input):
+    """Split a CLI command into its name and arguments.
+
+    Keep spaces inside names and notes. Split addresses only at
+    the first comma so the rest of the address stays intact.
+    """
     parts = user_input.split(maxsplit=1)
     if not parts:
         return "", []
@@ -772,7 +796,12 @@ Double quotation marks are optional.
 """)
 
 def main():
-    book, notebook = load_data()
+    try:
+        book, notebook = load_data()
+    except (OSError, EOFError, pickle.UnpicklingError, ValueError) as error:
+        print(f"Could not read {DATA_FILE}: {error}")
+        return
+
     handlers = {
         "add-user": (add_user, book),
         "add-contact": (add_contact, book),
@@ -811,6 +840,7 @@ def main():
     show_help()
 
     while True:
+        input_closed = False
         try:
             user_input = input("Enter a command: ")
             command, args = parse_input(user_input)
@@ -818,16 +848,22 @@ def main():
             print(error)
             continue
         except (EOFError, KeyboardInterrupt):
-            save_data(book, notebook)
-            print("\nGood bye!")
-            break
+            print()
+            command, args = "exit", []
+            input_closed = True
 
         if command in ("close", "exit", "hello", "help") and args:
             print(f"Usage: {command}")
             continue
 
         if command in ("close", "exit"):
-            save_data(book, notebook)
+            try:
+                save_data(book, notebook)
+            except OSError as error:
+                print(f"Could not save {DATA_FILE}: {error}")
+                if input_closed:
+                    break
+                continue
             print("Good bye!")
             break
 
