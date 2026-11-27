@@ -1,0 +1,510 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nova Lab · Personal Assistant</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font: 16px/1.5 system-ui, sans-serif;
+      color: #172a24;
+      background: #f6f8f4;
+      --accent: #245643;
+      --muted: #50635a;
+      --border: #dbe4dc;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    button, input, textarea { font: inherit; }
+    button { cursor: pointer; }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    :focus-visible { outline: 2px solid #387758; outline-offset: 4px; }
+    header { border-bottom: 1px solid var(--border); background: #fff; }
+    header div, main { width: min(100% - 2rem, 66rem); margin-inline: auto; }
+    header div { display: flex; align-items: center; gap: .65rem; height: 4rem; font-weight: 750; }
+    .mark {
+      display: grid;
+      place-items: center;
+      width: 2rem;
+      height: 2rem;
+      border-radius: .65rem;
+      background: var(--accent);
+      color: white;
+    }
+    main { padding-block: clamp(1.8rem, 5vw, 4rem); }
+    h1 {
+      margin: 0 0 1.65rem;
+      font-family: Georgia, serif;
+      font-size: clamp(2.1rem, 6vw, 4rem);
+      font-weight: 500;
+      line-height: 1.04;
+      letter-spacing: -.045em;
+    }
+    .workspace {
+      border: 1px solid var(--border);
+      border-radius: 1.25rem;
+      background: white;
+      box-shadow: 0 12px 45px #172a2409;
+    }
+    nav { display: flex; gap: .25rem; padding: .55rem; border-bottom: 1px solid var(--border); }
+    nav button, .secondary, .delete {
+      background: white;
+      border: 1px solid transparent;
+      border-radius: .55rem;
+      padding: .55rem .85rem;
+      color: var(--accent);
+      font-weight: 650;
+    }
+    nav button[aria-pressed="true"], #favorites-only[aria-pressed="true"] { background: #e8f1e9; }
+    .primary {
+      border: 1px solid var(--accent);
+      border-radius: .6rem;
+      background: var(--accent);
+      color: white;
+      padding: .55rem 1rem;
+      font-weight: 650;
+    }
+    .secondary { border-color: var(--border); }
+    .delete { color: #96382d; }
+    .delete:hover { background: #fdf0ed; }
+    .panel { padding: clamp(.9rem, 3vw, 1.65rem); }
+    .row { display: flex; gap: .75rem; justify-content: space-between; align-items: center; flex-wrap: wrap; }
+    h2, h3, p { margin: 0; }
+    h2 { font-size: 1.4rem; }
+    h3 { font-size: 1rem; }
+    #search-label { display: block; margin-block: 1.2rem .45rem; }
+    input, textarea {
+      width: 100%;
+      padding: .67rem .8rem;
+      border: 1px solid #bdcec1;
+      border-radius: .6rem;
+      color: inherit;
+      background: white;
+    }
+    textarea { resize: vertical; }
+    #favorites-only { margin-top: .65rem; }
+    #favorites-only[hidden] { display: none; }
+    #records {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+      gap: .75rem;
+      margin-top: 1rem;
+    }
+    .card {
+      padding: 1rem;
+      background: #fbfcfa;
+      border: 1px solid var(--border);
+      border-radius: .85rem;
+      overflow-wrap: anywhere;
+    }
+    .card h3 { margin-bottom: .6rem; }
+    .card p { white-space: pre-wrap; }
+    dl { margin: 0; }
+    dt { font-size: .8rem; color: var(--muted); }
+    dd { margin: 0 0 .45rem; }
+    .actions, .phone-row { display: flex; flex-wrap: wrap; gap: .4rem; }
+    .actions { margin-top: .9rem; }
+    .phone-row { align-items: center; }
+    .phone-row button { padding: .1rem .4rem; }
+    .empty {
+      grid-column: 1 / -1;
+      padding: 1.4rem 1rem;
+      text-align: center;
+      color: var(--muted);
+      background: #f7faf6;
+      border-radius: .65rem;
+    }
+    #status { min-height: 1.5em; color: var(--muted); margin-top: .9rem; }
+    dialog {
+      width: min(100% - 2rem, 31rem);
+      max-height: calc(100% - 2rem);
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      padding: 1.4rem;
+      color: inherit;
+    }
+    dialog::backdrop { background: #13282080; }
+    form label { display: grid; gap: .25rem; margin-block: .8rem; font-weight: 600; }
+    form label input, form label textarea { font-weight: 400; }
+    form footer { display: flex; justify-content: flex-end; gap: .6rem; margin-top: 1rem; }
+    #error { color: #96382d; }
+  </style>
+  <script defer src="https://cdn.jsdelivr.net/pyodide/v0.27.7/full/pyodide.js"></script>
+</head>
+<body>
+  <header><div><span class="mark" aria-hidden="true">N</span> Nova Lab</div></header>
+  <main>
+    <h1>Personal Assistant</h1>
+    <section class="workspace" aria-label="Personal assistant">
+      <nav aria-label="Workspace">
+        <button type="button" id="contacts-tab" aria-pressed="true" disabled>Contacts</button>
+        <button type="button" id="notes-tab" aria-pressed="false" disabled>Notes</button>
+      </nav>
+      <div class="panel">
+        <div class="row">
+          <h2 id="section-title">Contacts</h2>
+          <button type="button" class="primary" id="add" disabled>+ New contact</button>
+        </div>
+        <label id="search-label" for="search">Search contacts</label>
+        <input id="search" type="search" disabled>
+        <button type="button" class="secondary" id="favorites-only" aria-pressed="false" hidden>
+          Favorites only
+        </button>
+        <div id="records"></div>
+        <p id="status" role="status">Loading assistant…</p>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="editor" aria-labelledby="editor-title">
+    <form id="editor-form">
+      <h2 id="editor-title"></h2>
+      <div id="fields"></div>
+      <p id="error" role="alert"></p>
+      <footer>
+        <button type="button" class="secondary" id="cancel">Cancel</button>
+        <button type="submit" class="primary">Save</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <template id="contact-fields">
+    <label>Name<input name="name" required></label>
+    <label>Phone numbers (comma-separated)<input name="phones"></label>
+    <label>Email<input name="email"></label>
+    <label>Address<input name="address"></label>
+    <label>Birthday (DD.MM.YYYY)<input name="birthday" placeholder="DD.MM.YYYY"></label>
+  </template>
+  <template id="note-fields">
+    <label>Note<textarea name="text" required rows="5"></textarea></label>
+  </template>
+
+<script type="text/plain" id="python-bridge">
+import json
+
+if "NoteBook" not in globals():
+    raise RuntimeError("This version of main.py does not include NoteBook yet.")
+
+
+def make_contact(fields):
+    record = Record(fields["name"])
+    for phone in fields["phones"]:
+        record.add_phone(phone)
+    if fields["email"]:
+        record.set_email(fields["email"])
+    if fields["address"]:
+        record.set_address(fields["address"])
+    if fields["birthday"]:
+        record.add_birthday(fields["birthday"])
+    record.favorite = fields.get("favorite", False)
+    return record
+
+
+def contact_data(record):
+    return {
+        "name": str(record.name),
+        "phones": [str(phone) for phone in record.phones],
+        "email": str(record.email) if record.email is not None else "",
+        "address": str(record.address) if record.address is not None else "",
+        "birthday": str(record.birthday) if record.birthday is not None else "",
+        "favorite": record.favorite,
+    }
+
+
+def web_request(raw):
+    request = json.loads(raw)
+    state = request["state"]
+    book = AddressBook()
+    notebook = NoteBook()
+
+    for fields in state["contacts"]:
+        book.add_record(make_contact(fields))
+    for item in state["notes"]:
+        note = Note(item["id"], item["text"])
+        note.pinned = item.get("pinned", False)
+        notebook.notes[note.id] = note
+    notebook.next_id = state["next_id"]
+
+    data = request["data"]
+    action = request["action"]
+
+    try:
+        if action == "save_contact":
+            record = make_contact(data["fields"])
+            original = data["original"]
+            name = record.name.value
+            if book.find(name) is not None and name != original:
+                raise ValueError(f"Contact '{name}' already exists.")
+            if original is not None:
+                old_record = get_record(book, original)
+                record.favorite = old_record.favorite
+                if original != name:
+                    book.rename(original, name)
+            book.add_record(record)
+        elif action == "delete_contact":
+            book.delete(data["name"])
+        elif action == "toggle_favorite":
+            record = get_record(book, data["name"])
+            record.favorite = not record.favorite
+        elif action == "remove_phone":
+            record = get_record(book, data["name"])
+            if not record.remove_phone(data["phone"]):
+                raise ValueError("Phone number was not found.")
+        elif action == "save_note":
+            if data["id"] is None:
+                notebook.add(data["text"])
+            else:
+                notebook.get(str(data["id"])).edit(data["text"])
+        elif action == "delete_note":
+            notebook.delete(str(data["id"]))
+        elif action == "toggle_pin":
+            note = notebook.get(str(data["id"]))
+            note.pinned = not note.pinned
+        elif action != "load":
+            raise ValueError("Unknown action.")
+    except ValueError as error:
+        return json.dumps({"error": str(error)})
+
+    return json.dumps({"state": {
+        "contacts": [contact_data(record) for record in book.values()],
+        "notes": [
+            {"id": note.id, "text": note.text, "pinned": note.pinned}
+            for note in notebook.notes.values()
+        ],
+        "next_id": notebook.next_id,
+    }})
+</script>
+
+<script>
+"use strict";
+
+const get = (id) => document.getElementById(id);
+const storageKey = "nova-lab-assistant-v1";
+const emptyState = { contacts: [], notes: [], next_id: 1 };
+const search = get("search");
+const dialog = get("editor");
+const form = get("editor-form");
+let runtime, request, state, editing;
+let section = "contacts";
+let favoritesOnly = false;
+
+function node(tag, value, className) {
+  const item = document.createElement(tag);
+  item.textContent = value;
+  if (className) item.className = className;
+  return item;
+}
+
+function button(label, action, className) {
+  const item = node("button", label, className);
+  item.type = "button";
+  item.addEventListener("click", action);
+  return item;
+}
+
+function send(action, data = {}, current = state) {
+  const result = JSON.parse(request(JSON.stringify({ action, data, state: current })));
+  if (result.error) throw new Error(result.error);
+  if (action !== "load") {
+    localStorage.setItem(storageKey, JSON.stringify(result.state));
+  }
+  state = result.state;
+}
+
+function updateRecord(action, data, message) {
+  try {
+    send(action, data);
+    render();
+    get("status").textContent = message;
+  } catch (error) {
+    get("status").textContent = error.message;
+  }
+}
+
+function removeRecord(record) {
+  const isContact = section === "contacts";
+  const label = isContact ? record.name : "note #" + record.id;
+  if (!window.confirm("Delete " + label + "?")) return;
+
+  updateRecord(
+    isContact ? "delete_contact" : "delete_note",
+    isContact ? { name: record.name } : { id: record.id },
+    "Deleted " + label + ".",
+  );
+}
+
+function renderRecord(record, isContact) {
+  const card = node("article", "", "card");
+  const marked = isContact ? record.favorite : record.pinned;
+  const title = isContact ? record.name : "Note #" + record.id;
+  const marker = isContact ? " · Favorite" : " · Pinned";
+  card.append(node("h3", title + (marked ? marker : "")));
+
+  if (isContact) {
+    const details = node("dl", "");
+    if (record.phones.length) details.append(node("dt", "Phone"));
+
+    for (const phone of record.phones) {
+      const row = node("dd", phone, "phone-row");
+      const remove = button("Remove", () => {
+        updateRecord("remove_phone", { name: record.name, phone }, "Phone number removed.");
+      }, "delete");
+      remove.setAttribute("aria-label", "Remove phone number " + phone);
+      row.append(remove);
+      details.append(row);
+    }
+
+    const fields = [
+      ["Email", record.email],
+      ["Address", record.address],
+      ["Birthday", record.birthday],
+    ];
+    for (const [label, value] of fields) {
+      if (value) details.append(node("dt", label), node("dd", value));
+    }
+    if (details.children.length) card.append(details);
+  } else {
+    card.append(node("p", record.text));
+  }
+
+  const toggleLabel = isContact
+    ? (marked ? "Unfavorite" : "Favorite")
+    : (marked ? "Unpin" : "Pin");
+
+  const actions = node("div", "", "actions");
+  actions.append(
+    button(toggleLabel, () => {
+      const action = isContact ? "toggle_favorite" : "toggle_pin";
+      const data = isContact ? { name: record.name } : { id: record.id };
+      const message = isContact
+        ? (marked ? "Removed from favorites." : "Added to favorites.")
+        : (marked ? "Note unpinned." : "Note pinned.");
+      updateRecord(action, data, message);
+    }, "secondary"),
+    button("Edit", () => openEditor(record), "secondary"),
+    button("Delete", () => removeRecord(record), "delete"),
+  );
+  card.append(actions);
+  return card;
+}
+
+function render() {
+  const isContact = section === "contacts";
+  const query = search.value.trim().toLowerCase();
+  const shown = state[section].filter((item) => {
+    if (isContact && favoritesOnly && !item.favorite) return false;
+    const fields = isContact
+      ? [item.name, item.email, item.address, ...item.phones]
+      : [item.text];
+    return fields.some((value) => value.toLowerCase().includes(query));
+  }).sort((left, right) => {
+    const key = isContact ? "favorite" : "pinned";
+    return Number(right[key]) - Number(left[key]);
+  });
+
+  get("favorites-only").hidden = !isContact;
+  get("favorites-only").setAttribute("aria-pressed", favoritesOnly);
+  get("contacts-tab").setAttribute("aria-pressed", isContact);
+  get("notes-tab").setAttribute("aria-pressed", !isContact);
+  get("section-title").textContent = isContact ? "Contacts" : "Notes";
+  get("search-label").textContent = isContact ? "Search contacts" : "Search notes";
+  get("add").textContent = isContact ? "+ New contact" : "+ New note";
+
+  const singular = isContact ? "contact" : "note";
+  const message = query || (isContact && favoritesOnly)
+    ? "No matching " + section + "."
+    : "No " + section + " yet. Add your first " + singular + ".";
+
+  get("records").replaceChildren(...(shown.length
+    ? shown.map((item) => renderRecord(item, isContact))
+    : [node("p", message, "empty")]));
+}
+
+function openEditor(record = null) {
+  editing = record;
+  const isContact = section === "contacts";
+  const singular = isContact ? "contact" : "note";
+  get("editor-title").textContent = (record ? "Edit " : "New ") + singular;
+  const template = get(isContact ? "contact-fields" : "note-fields");
+  get("fields").replaceChildren(template.content.cloneNode(true));
+
+  if (record) {
+    for (const input of get("fields").querySelectorAll("[name]")) {
+      input.value = input.name === "phones" ? record.phones.join(", ") : record[input.name];
+    }
+  }
+  get("error").textContent = "";
+  dialog.showModal();
+  get("fields").querySelector("input, textarea").focus();
+}
+
+form.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const fields = Object.fromEntries(new FormData(form));
+  for (const key of Object.keys(fields)) fields[key] = fields[key].trim();
+
+  try {
+    if (section === "contacts") {
+      fields.phones = fields.phones
+        ? fields.phones.split(",").map((value) => value.trim())
+        : [];
+      send("save_contact", { fields, original: editing ? editing.name : null });
+    } else {
+      send("save_note", { id: editing ? editing.id : null, text: fields.text });
+    }
+    dialog.close();
+    render();
+    get("status").textContent = section === "contacts" ? "Contact saved." : "Note saved.";
+  } catch (error) {
+    get("error").textContent = error.message;
+  }
+});
+
+get("add").addEventListener("click", () => openEditor());
+get("cancel").addEventListener("click", () => dialog.close());
+search.addEventListener("input", render);
+
+get("favorites-only").addEventListener("click", () => {
+  favoritesOnly = !favoritesOnly;
+  render();
+});
+
+for (const tab of ["contacts", "notes"]) {
+  get(tab + "-tab").addEventListener("click", () => {
+    section = tab;
+    search.value = "";
+    get("status").textContent = "";
+    render();
+  });
+}
+
+window.addEventListener("DOMContentLoaded", async () => {
+  try {
+    const response = await fetch("./main.py");
+    if (!response.ok) {
+      throw new Error("Place index.html and main.py in the same published folder.");
+    }
+
+    runtime = await loadPyodide();
+    runtime.globals.set("__name__", "nova_lab_cli");
+    runtime.runPython(await response.text());
+    runtime.runPython(get("python-bridge").textContent);
+    request = runtime.globals.get("web_request");
+
+    const saved = localStorage.getItem(storageKey);
+    send("load", {}, saved ? JSON.parse(saved) : emptyState);
+
+    for (const id of ["contacts-tab", "notes-tab", "search", "add"]) {
+      get(id).disabled = false;
+    }
+    get("status").textContent = "";
+    render();
+  } catch (error) {
+    const message = String(error.message || error).trim().split("\n").pop();
+    get("status").textContent = "Could not open the assistant. " + message;
+  }
+});
+</script>
+</body>
+</html>

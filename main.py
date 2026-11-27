@@ -30,7 +30,6 @@ class Phone(Field):
             or not value.isdigit()
         ):
             raise ValueError("Phone number must contain exactly 10 digits.")
-
         super().__init__(value)
 
 
@@ -62,19 +61,19 @@ class Birthday(Field):
                 r"[0-9]{2}\.[0-9]{2}\.[0-9]{4}", value
             ):
                 raise ValueError
-
             birthday_date = datetime.strptime(value, "%d.%m.%Y").date()
         except ValueError:
             raise ValueError("Invalid date format. Use DD.MM.YYYY") from None
-
         super().__init__(birthday_date)
 
     def __str__(self):
         return f"{self.value:%d.%m}.{self.value.year:04d}"
 
+
 class Note:
     def __init__(self, note_id, text):
         self.id = note_id
+        self.pinned = False
         self.edit(text)
 
     def edit(self, text):
@@ -84,7 +83,8 @@ class Note:
         self.text = text
 
     def __str__(self):
-        return f"#{self.id} {self.text}"
+        marker = "[Pinned] " if self.pinned else ""
+        return f"{marker}#{self.id} {self.text}"
 
 
 class NoteBook:
@@ -111,13 +111,15 @@ class NoteBook:
             raise ValueError(f"Note #{note_id} was not found.")
         return note
 
+    def list_notes(self):
+        return sorted(self.notes.values(), key=lambda note: not note.pinned)
+
     def search(self, query):
         query = query.strip().casefold()
         if not query:
             raise ValueError("Search text cannot be empty.")
-
         return [
-            note for note in self.notes.values()
+            note for note in self.list_notes()
             if query in note.text.casefold()
         ]
 
@@ -125,7 +127,8 @@ class NoteBook:
         note = self.get(note_id)
         del self.notes[note.id]
         return note
-    
+
+
 class Record:
     def __init__(self, name):
         self.name = Name(name)
@@ -133,9 +136,11 @@ class Record:
         self.birthday = None
         self.address = None
         self.email = None
+        self.favorite = False
 
     def __setstate__(self, state):
-        # Contacts saved by the starter bot lack these optional fields.
+        # Older address books may lack these fields.
+        self.favorite = False
         self.address = None
         self.email = None
         self.__dict__.update(state)
@@ -160,14 +165,15 @@ class Record:
 
     def remove_phone(self, phone_number):
         phone = self.find_phone(phone_number)
-        if phone is not None:
-            self.phones.remove(phone)
+        if phone is None:
+            return False
+        self.phones.remove(phone)
+        return True
 
     def edit_phone(self, old_number, new_number):
         old_phone = self.find_phone(old_number)
         if old_phone is None:
             raise ValueError(f"Phone number {old_number} was not found.")
-
         new_phone = Phone(new_number)
         index = self.phones.index(old_phone)
         self.phones[index] = new_phone
@@ -177,8 +183,9 @@ class Record:
         birthday = str(self.birthday) if self.birthday is not None else "Not set"
         address = str(self.address) if self.address is not None else "Not set"
         email = str(self.email) if self.email is not None else "Not set"
+        marker = "[Favorite] " if self.favorite else ""
         return (
-            f"Contact name: {self.name}, phones: {phones}, address: {address}, "
+            f"{marker}Contact name: {self.name}, phones: {phones}, address: {address}, "
             f"email: {email}, birthday: {birthday}"
         )
 
@@ -272,7 +279,6 @@ def input_error(func):
             return func(args, book)
         except ValueError as error:
             return str(error)
-
     return wrapper
 
 
@@ -283,6 +289,7 @@ def require_args(args, count, usage):
     examples = {
         "add-contact": "add-contact Anna Smith, 7045550123",
         "change": "change Anna Smith, 7045550123, 7045550199",
+        "remove-phone": "remove-phone Anna Smith, 7045550123",
         "set-email": "set-email Anna Smith, anna@example.com",
         "rename-contact": "rename-contact Anna Smith, Anna Brown",
         "add-birthday": "add-birthday Anna Smith, 26.11.1998",
@@ -290,12 +297,8 @@ def require_args(args, count, usage):
 
     command = usage.split(maxsplit=1)[0]
     example = examples.get(command)
-
     if example:
-        raise ValueError(
-            f"Separate the fields with commas.\nExample: {example}"
-        )
-
+        raise ValueError(f"Separate the fields with commas.\nExample: {example}")
     raise ValueError(f"Usage: {usage}")
 
 
@@ -304,6 +307,7 @@ def get_record(book, name):
     if record is None:
         raise ValueError(f"Contact '{name}' was not found.")
     return record
+
 
 @input_error
 def add_user(args, book):
@@ -315,6 +319,7 @@ def add_user(args, book):
 
     book.add_record(Record(name))
     return "Contact added."
+
 
 @input_error
 def add_contact(args, book):
@@ -384,9 +389,49 @@ def show_phone(args, book):
 
 
 @input_error
+def show_contact(args, book):
+    require_args(args, 1, "show-contact [name]")
+    return str(get_record(book, args[0]))
+
+
+@input_error
+def remove_phone(args, book):
+    require_args(args, 2, "remove-phone [name], [phone]")
+    name, phone = args
+    record = get_record(book, name)
+    if not record.remove_phone(phone):
+        raise ValueError(f"Phone number {phone} was not found for {name}.")
+    return "Phone number removed."
+
+
+@input_error
+def favorite_contact(args, book):
+    require_args(args, 1, "favorite [name]")
+    record = get_record(book, args[0])
+    record.favorite = True
+    return f"{record.name} marked as a favorite."
+
+
+@input_error
+def unfavorite_contact(args, book):
+    require_args(args, 1, "unfavorite [name]")
+    record = get_record(book, args[0])
+    record.favorite = False
+    return f"{record.name} removed from favorites."
+
+
+@input_error
+def show_favorites(args, book):
+    require_args(args, 0, "favorites")
+    favorites = (str(record) for record in book.values() if record.favorite)
+    return "\n".join(favorites) or "No favorite contacts."
+
+
+@input_error
 def show_all(args, book):
     require_args(args, 0, "all")
-    return "\n".join(str(record) for record in book.data.values()) or "No contacts."
+    records = sorted(book.values(), key=lambda record: not record.favorite)
+    return "\n".join(str(record) for record in records) or "No contacts."
 
 
 @input_error
@@ -405,7 +450,6 @@ def show_birthday(args, book):
 
     if record.birthday is None:
         return f"No birthday saved for {name}."
-
     return f"{record.name}: {record.birthday}"
 
 
@@ -421,6 +465,7 @@ def birthdays(args, book):
         f"{item['congratulation_date']} — {item['name']}"
         for item in upcoming
     )
+
 
 @input_error
 def add_note(args, notebook):
@@ -452,10 +497,33 @@ def delete_note(args, notebook):
     return f"Note #{note.id} deleted."
 
 
+@input_error
+def list_notes(args, notebook):
+    require_args(args, 0, "list-notes")
+    return "\n".join(str(note) for note in notebook.list_notes()) or "No notes yet."
+
+
+@input_error
+def pin_note(args, notebook):
+    require_args(args, 1, "pin-note [id]")
+    note = notebook.get(args[0])
+    note.pinned = True
+    return f"Note #{note.id} pinned."
+
+
+@input_error
+def unpin_note(args, notebook):
+    require_args(args, 1, "unpin-note [id]")
+    note = notebook.get(args[0])
+    note.pinned = False
+    return f"Note #{note.id} unpinned."
+
+
 def remove_note_quotes(text):
     if len(text) >= 2 and text.startswith('"') and text.endswith('"'):
         return text[1:-1]
     return text
+
 
 def parse_input(user_input):
     parts = user_input.split(maxsplit=1)
@@ -473,7 +541,7 @@ def parse_input(user_input):
                 "Example: set-address Anna Smith, 100 Main St"
             )
         return command, [name.strip(), address.strip()]
-    
+
     if command == "edit-note" and text:
         args = re.split(r"\s*,\s*|\s+", text, maxsplit=1)
         if len(args) == 2:
@@ -489,6 +557,7 @@ def parse_input(user_input):
     comma_commands = {
         "add-contact": 1,
         "change": 2,
+        "remove-phone": 1,
         "set-email": 1,
         "rename-contact": 1,
         "add-birthday": 1,
@@ -523,7 +592,7 @@ def main():
         elif command == "hello":
             print("How can I help you?")
         elif command == "add-user":
-            print(add_user(args, book))    
+            print(add_user(args, book))
         elif command == "add-contact":
             print(add_contact(args, book))
         elif command == "change":
@@ -540,6 +609,16 @@ def main():
             print(show_phone(args, book))
         elif command == "all":
             print(show_all(args, book))
+        elif command == "show-contact":
+            print(show_contact(args, book))
+        elif command == "remove-phone":
+            print(remove_phone(args, book))
+        elif command == "favorite":
+            print(favorite_contact(args, book))
+        elif command == "unfavorite":
+            print(unfavorite_contact(args, book))
+        elif command == "favorites":
+            print(show_favorites(args, book))
         elif command == "add-birthday":
             print(add_birthday(args, book))
         elif command == "show-birthday":
@@ -554,6 +633,12 @@ def main():
             print(edit_note(args, notebook))
         elif command == "delete-note":
             print(delete_note(args, notebook))
+        elif command == "list-notes":
+            print(list_notes(args, notebook))
+        elif command == "pin-note":
+            print(pin_note(args, notebook))
+        elif command == "unpin-note":
+            print(unpin_note(args, notebook))
         elif command:
             print("Invalid command.")
 
