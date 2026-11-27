@@ -14,7 +14,11 @@ class Field:
 
 
 class Name(Field):
-    pass
+    def __init__(self, value):
+        value = value.strip()
+        if not value:
+            raise ValueError("Contact name cannot be empty.")
+        super().__init__(value)
 
 
 class Phone(Field):
@@ -27,6 +31,27 @@ class Phone(Field):
         ):
             raise ValueError("Phone number must contain exactly 10 digits.")
 
+        super().__init__(value)
+
+
+class Address(Field):
+    def __init__(self, value):
+        value = value.strip()
+        if not value:
+            raise ValueError("Address cannot be empty.")
+        super().__init__(value)
+
+
+class Email(Field):
+    def __init__(self, value):
+        value = value.strip()
+        local_part = r"[a-zA-Z0-9!#$%&'*+/=?^_`{|}~-]+"
+        domain_label = r"[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?"
+        pattern = rf"{local_part}(?:\.{local_part})*@{domain_label}(?:\.{domain_label})+"
+        if not re.fullmatch(pattern, value):
+            raise ValueError(
+                "Invalid email address. Use a format like anna@example.com."
+            )
         super().__init__(value)
 
 
@@ -53,12 +78,26 @@ class Record:
         self.name = Name(name)
         self.phones = []
         self.birthday = None
+        self.address = None
+        self.email = None
+
+    def __setstate__(self, state):
+        # Contacts saved by the starter bot lack these optional fields.
+        self.address = None
+        self.email = None
+        self.__dict__.update(state)
 
     def add_phone(self, phone_number):
         self.phones.append(Phone(phone_number))
 
     def add_birthday(self, birthday):
         self.birthday = Birthday(birthday)
+
+    def set_address(self, address):
+        self.address = Address(address)
+
+    def set_email(self, email):
+        self.email = Email(email)
 
     def find_phone(self, phone_number):
         for phone in self.phones:
@@ -83,14 +122,19 @@ class Record:
     def __str__(self):
         phones = "; ".join(phone.value for phone in self.phones) or "No phones"
         birthday = str(self.birthday) if self.birthday is not None else "Not set"
-        return f"Contact name: {self.name}, phones: {phones}, birthday: {birthday}"
+        address = str(self.address) if self.address is not None else "Not set"
+        email = str(self.email) if self.email is not None else "Not set"
+        return (
+            f"Contact name: {self.name}, phones: {phones}, address: {address}, "
+            f"email: {email}, birthday: {birthday}"
+        )
 
 
 def birthday_in_year(birthday_date, year):
     try:
         return birthday_date.replace(year=year)
     except ValueError:
-        # Для 29 лютого в невисокосному році використовуємо 28 лютого.
+        # Use February 28 for leap-day birthdays in non-leap years.
         return date(year, 2, 28)
 
 
@@ -103,6 +147,21 @@ class AddressBook(UserDict):
 
     def delete(self, name):
         self.data.pop(name, None)
+
+    def rename(self, old_name, new_name):
+        record = self.find(old_name)
+        if record is None:
+            raise ValueError(f"Contact '{old_name}' was not found.")
+
+        updated_name = Name(new_name)
+        if updated_name.value == old_name:
+            return
+        if updated_name.value in self.data:
+            raise ValueError(f"Contact '{updated_name}' already exists.")
+
+        del self.data[old_name]
+        record.name = updated_name
+        self.add_record(record)
 
     def get_upcoming_birthdays(self):
         today = date.today()
@@ -165,8 +224,26 @@ def input_error(func):
 
 
 def require_args(args, count, usage):
-    if len(args) != count:
-        raise ValueError(f"Usage: {usage}")
+    if len(args) == count and all(args):
+        return
+
+    examples = {
+        "add-contact": "add-contact Anna Smith, 7045550123",
+        "change": "change Anna Smith, 7045550123, 7045550199",
+        "set-email": "set-email Anna Smith, anna@example.com",
+        "rename-contact": "rename-contact Anna Smith, Anna Brown",
+        "add-birthday": "add-birthday Anna Smith, 26.11.1998",
+    }
+
+    command = usage.split(maxsplit=1)[0]
+    example = examples.get(command)
+
+    if example:
+        raise ValueError(
+            f"Separate the fields with commas.\nExample: {example}"
+        )
+
+    raise ValueError(f"Usage: {usage}")
 
 
 def get_record(book, name):
@@ -175,11 +252,22 @@ def get_record(book, name):
         raise ValueError(f"Contact '{name}' was not found.")
     return record
 
+@input_error
+def add_user(args, book):
+    require_args(args, 1, "add-user [name]")
+    name = Name(args[0]).value
+
+    if book.find(name) is not None:
+        raise ValueError(f"Contact '{name}' already exists.")
+
+    book.add_record(Record(name))
+    return "Contact added."
 
 @input_error
 def add_contact(args, book):
-    require_args(args, 2, "add [name] [phone]")
+    require_args(args, 2, "add-contact [name], [phone]")
     name, phone = args
+    name = Name(name).value
     record = book.find(name)
 
     if record is None:
@@ -194,10 +282,43 @@ def add_contact(args, book):
 
 @input_error
 def change_contact(args, book):
-    require_args(args, 3, "change [name] [old phone] [new phone]")
+    require_args(args, 3, "change [name], [old phone], [new phone]")
     name, old_phone, new_phone = args
     get_record(book, name).edit_phone(old_phone, new_phone)
     return "Phone number updated."
+
+
+@input_error
+def set_address(args, book):
+    require_args(args, 2, "set-address [name], [address]")
+    name, address = args
+    get_record(book, name).set_address(address)
+    return "Address saved."
+
+
+@input_error
+def set_email(args, book):
+    require_args(args, 2, "set-email [name], [email]")
+    name, email = args
+    get_record(book, name).set_email(email)
+    return "Email saved."
+
+
+@input_error
+def rename_contact(args, book):
+    require_args(args, 2, "rename-contact [old name], [new name]")
+    old_name, new_name = args
+    book.rename(old_name, new_name)
+    return "Contact renamed."
+
+
+@input_error
+def delete_contact(args, book):
+    require_args(args, 1, "delete-contact [name]")
+    name = args[0]
+    get_record(book, name)
+    book.delete(name)
+    return "Contact deleted."
 
 
 @input_error
@@ -217,7 +338,7 @@ def show_all(args, book):
 
 @input_error
 def add_birthday(args, book):
-    require_args(args, 2, "add-birthday [name] [DD.MM.YYYY]")
+    require_args(args, 2, "add-birthday [name], [DD.MM.YYYY]")
     name, birthday = args
     get_record(book, name).add_birthday(birthday)
     return "Birthday saved."
@@ -250,12 +371,41 @@ def birthdays(args, book):
 
 
 def parse_input(user_input):
-    parts = user_input.split()
+    parts = user_input.split(maxsplit=1)
     if not parts:
         return "", []
 
-    command, *args = parts
-    return command.lower(), args
+    command = parts[0].lower()
+    text = parts[1].strip() if len(parts) == 2 else ""
+
+    if command == "set-address":
+        name, comma, address = text.partition(",")
+        if not comma or not name.strip() or not address.strip():
+            raise ValueError(
+                "Separate the name and address with a comma. "
+                "Example: set-address Anna Smith, 100 Main St"
+            )
+        return command, [name.strip(), address.strip()]
+
+    if not text:
+        return command, []
+
+    comma_commands = {
+        "add-contact": 1,
+        "change": 2,
+        "set-email": 1,
+        "rename-contact": 1,
+        "add-birthday": 1,
+    }
+
+    if command in comma_commands:
+        args = [
+            part.strip()
+            for part in text.split(",", maxsplit=comma_commands[command])
+        ]
+        return command, args
+
+    return command, [text]
 
 
 def main():
@@ -263,7 +413,11 @@ def main():
     print("Welcome to the assistant bot!")
 
     while True:
-        command, args = parse_input(input("Enter a command: "))
+        try:
+            command, args = parse_input(input("Enter a command: "))
+        except ValueError as error:
+            print(error)
+            continue
 
         if command in ("close", "exit"):
             save_data(book)
@@ -271,10 +425,20 @@ def main():
             break
         elif command == "hello":
             print("How can I help you?")
-        elif command == "add":
+        elif command == "add-user":
+            print(add_user(args, book))    
+        elif command == "add-contact":
             print(add_contact(args, book))
         elif command == "change":
             print(change_contact(args, book))
+        elif command == "set-address":
+            print(set_address(args, book))
+        elif command == "set-email":
+            print(set_email(args, book))
+        elif command == "rename-contact":
+            print(rename_contact(args, book))
+        elif command == "delete-contact":
+            print(delete_contact(args, book))
         elif command == "phone":
             print(show_phone(args, book))
         elif command == "all":
