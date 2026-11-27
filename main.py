@@ -72,7 +72,60 @@ class Birthday(Field):
     def __str__(self):
         return f"{self.value:%d.%m}.{self.value.year:04d}"
 
+class Note:
+    def __init__(self, note_id, text):
+        self.id = note_id
+        self.edit(text)
 
+    def edit(self, text):
+        text = text.strip()
+        if not text:
+            raise ValueError("Note text cannot be empty.")
+        self.text = text
+
+    def __str__(self):
+        return f"#{self.id} {self.text}"
+
+
+class NoteBook:
+    def __init__(self):
+        self.notes = {}
+        self.next_id = 1
+
+    def add(self, text):
+        note = Note(self.next_id, text)
+        self.notes[note.id] = note
+        self.next_id += 1
+        return note
+
+    def get(self, note_id):
+        if not note_id.isascii() or not note_id.isdecimal():
+            raise ValueError("Note ID must be a positive whole number.")
+
+        note_id = int(note_id)
+        if note_id <= 0:
+            raise ValueError("Note ID must be a positive whole number.")
+
+        note = self.notes.get(note_id)
+        if note is None:
+            raise ValueError(f"Note #{note_id} was not found.")
+        return note
+
+    def search(self, query):
+        query = query.strip().casefold()
+        if not query:
+            raise ValueError("Search text cannot be empty.")
+
+        return [
+            note for note in self.notes.values()
+            if query in note.text.casefold()
+        ]
+
+    def delete(self, note_id):
+        note = self.get(note_id)
+        del self.notes[note.id]
+        return note
+    
 class Record:
     def __init__(self, name):
         self.name = Name(name)
@@ -369,6 +422,40 @@ def birthdays(args, book):
         for item in upcoming
     )
 
+@input_error
+def add_note(args, notebook):
+    require_args(args, 1, "add-note [text]")
+    note = notebook.add(args[0])
+    return f"Note #{note.id} added."
+
+
+@input_error
+def search_note(args, notebook):
+    require_args(args, 1, "search-note [text]")
+    matches = notebook.search(args[0])
+    return "\n".join(str(note) for note in matches) or "No matching notes."
+
+
+@input_error
+def edit_note(args, notebook):
+    require_args(args, 2, "edit-note [id], [new text]")
+    note_id, text = args
+    note = notebook.get(note_id)
+    note.edit(text)
+    return f"Note #{note.id} updated."
+
+
+@input_error
+def delete_note(args, notebook):
+    require_args(args, 1, "delete-note [id]")
+    note = notebook.delete(args[0])
+    return f"Note #{note.id} deleted."
+
+
+def remove_note_quotes(text):
+    if len(text) >= 2 and text.startswith('"') and text.endswith('"'):
+        return text[1:-1]
+    return text
 
 def parse_input(user_input):
     parts = user_input.split(maxsplit=1)
@@ -386,6 +473,15 @@ def parse_input(user_input):
                 "Example: set-address Anna Smith, 100 Main St"
             )
         return command, [name.strip(), address.strip()]
+    
+    if command == "edit-note" and text:
+        args = re.split(r"\s*,\s*|\s+", text, maxsplit=1)
+        if len(args) == 2:
+            args[1] = remove_note_quotes(args[1])
+        return command, args
+
+    if command in ("add-note", "search-note") and text:
+        return command, [remove_note_quotes(text)]
 
     if not text:
         return command, []
@@ -410,6 +506,7 @@ def parse_input(user_input):
 
 def main():
     book = load_data()
+    notebook = NoteBook()
     print("Welcome to the assistant bot!")
 
     while True:
@@ -449,6 +546,14 @@ def main():
             print(show_birthday(args, book))
         elif command == "birthdays":
             print(birthdays(args, book))
+        elif command == "add-note":
+            print(add_note(args, notebook))
+        elif command == "search-note":
+            print(search_note(args, notebook))
+        elif command == "edit-note":
+            print(edit_note(args, notebook))
+        elif command == "delete-note":
+            print(delete_note(args, notebook))
         elif command:
             print("Invalid command.")
 
