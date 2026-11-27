@@ -1,5 +1,6 @@
 import pickle
 import re
+from pathlib import Path
 from collections import UserDict
 from datetime import date, datetime, timedelta
 from functools import wraps
@@ -298,17 +299,23 @@ class AddressBook(UserDict):
         ]
 
 
-def save_data(book, filename="addressbook.pkl"):
-    with open(filename, "wb") as file:
-        pickle.dump(book, file)
+DATA_DIR = Path.home() / ".nova4lab"
+DATA_FILE = DATA_DIR / "data.pkl"
 
 
-def load_data(filename="addressbook.pkl"):
+def save_data(book, notebook):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    with open(DATA_FILE, "wb") as file:
+        pickle.dump((book, notebook), file)
+
+
+def load_data():
     try:
-        with open(filename, "rb") as file:
+        with open(DATA_FILE, "rb") as file:
             return pickle.load(file)
     except FileNotFoundError:
-        return AddressBook()
+        return AddressBook(), NoteBook()
 
 
 def input_error(func):
@@ -322,8 +329,10 @@ def input_error(func):
 
 
 def require_args(args, count, usage):
-    if len(args) == count and all(args):
+    if len(args) == count and all(arg.strip() for arg in args):
         return
+
+    raise ValueError(f"Usage: {usage}")
 
     examples = {
         "add-contact": "add-contact Anna Smith, 7045550123",
@@ -579,12 +588,10 @@ def unpin_note(args, notebook):
     note.pinned = False
     return f"Note #{note.id} unpinned."
 
-
 def remove_note_quotes(text):
-    if len(text) >= 2 and text.startswith('"') and text.endswith('"'):
+    if text.startswith('"') and text.endswith('"'):
         return text[1:-1]
     return text
-
 
 def parse_input(user_input):
     parts = user_input.split(maxsplit=1)
@@ -594,6 +601,12 @@ def parse_input(user_input):
     command = parts[0].lower()
     text = parts[1].strip() if len(parts) == 2 else ""
 
+    if text.count('"') % 2 != 0:
+        raise ValueError("Invalid input. Check your quotation marks.")
+
+    if not text:
+        return command, []
+
     if command == "set-address":
         name, comma, address = text.partition(",")
         if not comma or not name.strip() or not address.strip():
@@ -601,19 +614,14 @@ def parse_input(user_input):
                 "Separate the name and address with a comma. "
                 "Example: set-address Anna Smith, 100 Main St"
             )
-        return command, [name.strip(), address.strip()]
+        return command, [
+            remove_note_quotes(name.strip()),
+            remove_note_quotes(address.strip())
+        ]
 
-    if command == "edit-note" and text:
+    if command == "edit-note":
         args = re.split(r"\s*,\s*|\s+", text, maxsplit=1)
-        if len(args) == 2:
-            args[1] = remove_note_quotes(args[1])
-        return command, args
-
-    if command in ("add-note", "search-note") and text:
-        return command, [remove_note_quotes(text)]
-
-    if not text:
-        return command, []
+        return command, [remove_note_quotes(arg) for arg in args]
 
     comma_commands = {
         "add-contact": 1,
@@ -626,18 +634,68 @@ def parse_input(user_input):
 
     if command in comma_commands:
         args = [
-            part.strip()
+            remove_note_quotes(part.strip())
             for part in text.split(",", maxsplit=comma_commands[command])
         ]
         return command, args
 
-    return command, [text]
+    return command, [remove_note_quotes(text)]
 
+def show_help():
+    print("""
+========================================================
+                  NOVA4LAB ASSISTANT
+========================================================
+
+CONTACT COMMANDS
+
+add-user name
+add-contact name, phone
+change name, old_phone, new_phone
+remove-phone name, phone
+phone name
+set-address name, address
+set-email name, email
+rename-contact old_name, new_name
+delete-contact name
+show-contact name
+search-contact query
+all
+favorite name
+unfavorite name
+favorites
+add-birthday name, DD.MM.YYYY
+show-birthday name
+birthdays [days]
+
+NOTE COMMANDS
+
+add-note text
+list-notes
+search-note text
+edit-note id, new_text
+delete-note id
+pin-note id
+unpin-note id
+
+SYSTEM COMMANDS
+
+hello       - Greeting
+help        - Show available commands
+exit        - Save data and exit
+close       - Save data and exit
+
+Separate arguments with commas where indicated.
+Double quotation marks are optional.
+
+========================================================
+""")
 
 def main():
-    book = load_data()
-    notebook = NoteBook()
-    print("Welcome to the assistant bot!")
+    book, notebook = load_data()
+
+    print("Welcome to the Nova4Lab assistant bot!")
+    show_help()
 
     while True:
         try:
@@ -645,65 +703,103 @@ def main():
         except ValueError as error:
             print(error)
             continue
+        except (EOFError, KeyboardInterrupt):
+            save_data(book, notebook)
+            print("\nGood bye!")
+            break
+
+        if command in ("close", "exit", "hello", "help") and args:
+            print(f"Usage: {command}")
+            continue
 
         if command in ("close", "exit"):
-            save_data(book)
+            save_data(book, notebook)
             print("Good bye!")
             break
+
         elif command == "hello":
             print("How can I help you?")
+
+        elif command == "help":
+            show_help()
+
         elif command == "add-user":
             print(add_user(args, book))
+
         elif command == "add-contact":
             print(add_contact(args, book))
+
         elif command == "change":
             print(change_contact(args, book))
+
         elif command == "set-address":
             print(set_address(args, book))
+
         elif command == "set-email":
             print(set_email(args, book))
+
         elif command == "rename-contact":
             print(rename_contact(args, book))
+
         elif command == "delete-contact":
             print(delete_contact(args, book))
+
         elif command == "phone":
             print(show_phone(args, book))
+
         elif command == "all":
             print(show_all(args, book))
+
         elif command == "show-contact":
             print(show_contact(args, book))
+
         elif command == "remove-phone":
             print(remove_phone(args, book))
+
         elif command == "favorite":
             print(favorite_contact(args, book))
+
         elif command == "unfavorite":
             print(unfavorite_contact(args, book))
+
         elif command == "favorites":
             print(show_favorites(args, book))
+
         elif command == "search-contact":
-            print(search_contact(args, book))    
+            print(search_contact(args, book))
+
         elif command == "add-birthday":
             print(add_birthday(args, book))
+
         elif command == "show-birthday":
             print(show_birthday(args, book))
+
         elif command == "birthdays":
             print(birthdays(args, book))
+
         elif command == "add-note":
             print(add_note(args, notebook))
+
         elif command == "search-note":
             print(search_note(args, notebook))
+
         elif command == "edit-note":
             print(edit_note(args, notebook))
+
         elif command == "delete-note":
             print(delete_note(args, notebook))
+
         elif command == "list-notes":
             print(list_notes(args, notebook))
+
         elif command == "pin-note":
             print(pin_note(args, notebook))
+
         elif command == "unpin-note":
             print(unpin_note(args, notebook))
-        elif command:
-            print("Invalid command.")
+
+        else:
+            print("Invalid command. Type 'help' for available commands.")
 
 
 if __name__ == "__main__":

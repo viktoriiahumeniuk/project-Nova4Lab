@@ -4,7 +4,7 @@ A Python assistant for managing contacts, birthdays, and notes. It runs in the t
 
 ## Run locally
 
-You need Python 3.10 or later. The CLI uses the Python standard library.
+You need Python 3.10 or later. The CLI uses the Python standard library and does not require additional dependencies.
 
 ```bash
 git clone https://github.com/viktoriiahumeniuk/project-Nova4Lab.git
@@ -17,7 +17,24 @@ cd project-Nova4Lab
 python3 main.py
 ```
 
-Enter a command at the prompt. Use commas between separate fields. Full names and addresses can contain spaces. Enter birthdays as `DD.MM.YYYY` and phone numbers as 10 digits.
+On startup, the assistant displays a menu with all available commands. Enter `help` to display the menu again.
+
+Use commas between separate fields where indicated. Full names, addresses, and notes can contain spaces. Double quotation marks are optional.
+
+Enter birthdays as `DD.MM.YYYY` and phone numbers as exactly 10 digits.
+
+Examples:
+
+```text
+add-contact Anna Smith, 7045550123
+add-contact "Anna Smith", 7045550123
+set-address Anna Smith, 100 Main St, Charlotte
+set-address "Anna Smith", "100 Main St, Charlotte"
+add-note Pick up balloons on Friday
+add-note "Pick up balloons on Friday"
+```
+
+Unknown commands, invalid arguments, and unclosed double quotation marks display an error message without stopping the assistant.
 
 ### Browser
 
@@ -27,7 +44,13 @@ Keep `index.html` and `main.py` in the same folder. Start a local server from th
 python3 -m http.server 8000
 ```
 
-Open [http://localhost:8000](http://localhost:8000). The **Contacts** tab lets you search, edit, favorite, and delete contacts or remove individual phone numbers. The **Notes** tab lets you search, edit, pin, and delete notes. An internet connection is needed to load the Pyodide runtime that runs the Python models in the browser.
+Open [http://localhost:8000](http://localhost:8000).
+
+The **Contacts** tab lets you search, edit, favorite, and delete contacts or remove individual phone numbers.
+
+The **Notes** tab lets you search, edit, pin, and delete notes.
+
+An internet connection is needed to load the Pyodide runtime that runs the Python models in the browser.
 
 ## CLI command reference
 
@@ -46,11 +69,16 @@ Open [http://localhost:8000](http://localhost:8000). The **Contacts** tab lets y
 | `set-email Anna Smith, anna@example.com` | Add or update an email |
 | `rename-contact Anna Smith, Anna Brown` | Rename a contact |
 | `delete-contact Anna Brown` | Delete a contact |
-| `favorite Anna Smith` / `unfavorite Anna Smith` | Add or remove a favorite |
+| `search-contact Anna` | Search contacts by name, phone number, or email |
+| `favorite Anna Smith` | Mark a contact as a favorite |
+| `unfavorite Anna Smith` | Remove a contact from favorites |
 | `favorites` | List favorite contacts |
 | `add-birthday Anna Smith, 26.11.1998` | Add or update a birthday |
 | `show-birthday Anna Smith` | Show one contact's birthday |
 | `birthdays` | Show birthdays from today through seven days ahead |
+| `birthdays 3` | Show birthdays occurring exactly three days from today |
+
+Birthday congratulations that fall on a weekend are moved to the following Monday.
 
 ### Notes
 
@@ -61,19 +89,67 @@ Open [http://localhost:8000](http://localhost:8000). The **Contacts** tab lets y
 | `search-note balloons` | Find notes by a case-insensitive text fragment |
 | `edit-note 1, Pick up balloons on Saturday` | Update note 1 |
 | `delete-note 1` | Delete note 1 |
-| `pin-note 1` / `unpin-note 1` | Pin or unpin note 1 |
+| `pin-note 1` | Pin note 1 |
+| `unpin-note 1` | Unpin note 1 |
 
-Enter `hello` for a greeting. Enter `exit` or `close` to save contacts and close the CLI.
+### System commands
+
+| Command | What it does |
+| --- | --- |
+| `hello` | Display a greeting |
+| `help` | Display all available commands |
+| `exit` | Save contacts and notes and exit the assistant |
+| `close` | Save contacts and notes and exit the assistant |
 
 ## Data storage
 
-- **CLI** saves contacts and favorites to `addressbook.pkl` in the directory from which you launch the app. Notes and pins are kept for the current session.
-- **Browser** saves contacts, favorites, notes, and pins in the current browser's local storage. The browser and CLI have separate data.
+### CLI
+
+The assistant uses Python's `pickle` module to save contacts and notes in a permanent directory inside the user's home folder:
+
+```text
+~/.nova4lab/data.pkl
+```
+
+The directory and data file are created automatically when the data is first saved.
+
+On the first launch, the assistant starts with an empty address book and notebook.
+
+The following data is saved:
+
+- Contacts and phone numbers
+- Addresses and email addresses
+- Birthdays
+- Favorite contacts
+- Notes and pinned notes
+- Note IDs and the next available note ID
+
+Data is saved when the user enters `exit` or `close`, presses Ctrl+C, or sends an end-of-file signal at the command prompt.
+
+On the next launch, contacts and notes are restored automatically, including previous edits and deletions.
+
+The data location is independent of the current working directory, so the assistant can be launched from different directories without losing access to saved data.
+
+New notes receive unique IDs, including after restarting the assistant.
+
+### Browser
+
+The browser version saves contacts, favorites, notes, and pins in the current browser's local storage.
+
+The browser and CLI have separate data storage.
 
 ## Publish the browser version
 
-Once `index.html` and `main.py` are in the root of `main`, open the GitHub repository's **Settings → Pages**. Choose **Deploy from a branch**, then **main** and **/(root)**. Save and open the URL shown by GitHub Pages.
+Once `index.html` and `main.py` are in the root of `main`, open the GitHub repository's **Settings → Pages**.
+
+Choose **Deploy from a branch**, then **main** and **/(root)**.
+
+Save and open the URL shown by GitHub Pages.
 
 ## Team workflow
 
-Pick a Trello card, create a feature branch, and link the card in your pull request. Request a review before merging and keep the merged pull request link for the course submission.
+Pick a Trello card, create a feature branch, and link the card in your pull request.
+
+Request a review before merging and keep the merged pull request link for the course submission.
+
+Before the final submission, test all CLI commands, error handling, and data persistence. Review the final implementation with the mentor and resolve any critical issues.
