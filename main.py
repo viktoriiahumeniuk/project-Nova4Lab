@@ -226,20 +226,25 @@ class AddressBook(UserDict):
         query = query.strip().lower()
         results = []
 
-    if not query:
-        return results
+        if not query:
+            return results
 
-    for record in self.data.values():
-        name_match = query in record.name.value.lower()
-        phone_match = any(query == phone.value for phone in record.phones)
-        email_match = record.email is not None and query == record.email.value.lower()
+        for record in self.data.values():
+            name_match = query in record.name.value.lower()
+            phone_match = any(
+                query == phone.value for phone in record.phones
+            )
+            email_match = (
+                record.email is not None
+                and query == record.email.value.lower()
+            )
 
-        if name_match or phone_match or email_match:
-            results.append(record)
+            if name_match or phone_match or email_match:
+                results.append(record)
 
-    return results    
+        return results    
 
-    def get_upcoming_birthdays(self):
+    def get_upcoming_birthdays(self, days=None):
         today = date.today()
         upcoming_birthdays = []
 
@@ -248,24 +253,42 @@ class AddressBook(UserDict):
                 continue
 
             birthday_date = record.birthday.value
-            next_birthday = birthday_in_year(birthday_date, today.year)
 
-            if next_birthday < today:
-                next_birthday = birthday_in_year(birthday_date, today.year + 1)
+            if days is None:
+                next_birthday = birthday_in_year(birthday_date, today.year)
 
-            days_until_birthday = (next_birthday - today).days
-            if not 0 <= days_until_birthday <= 7:
-                continue
+                if next_birthday < today:
+                    next_birthday = birthday_in_year(
+                        birthday_date, today.year + 1
+                    )
+
+                days_until_birthday = (next_birthday - today).days
+
+                if not 0 <= days_until_birthday <= 7:
+                    continue
+
+            else:
+                target_date = today + timedelta(days=days)
+                next_birthday = birthday_in_year(
+                    birthday_date, target_date.year
+                )
+
+                if next_birthday != target_date:
+                    continue
 
             congratulation_date = next_birthday
+
             if next_birthday.weekday() == 5:
                 congratulation_date += timedelta(days=2)
             elif next_birthday.weekday() == 6:
                 congratulation_date += timedelta(days=1)
 
-            upcoming_birthdays.append((congratulation_date, record.name.value))
+            upcoming_birthdays.append(
+                (congratulation_date, record.name.value)
+            )
 
         upcoming_birthdays.sort()
+
         return [
             {
                 "name": name,
@@ -411,6 +434,11 @@ def show_all(args, book):
     require_args(args, 0, "all")
     return "\n".join(str(record) for record in book.data.values()) or "No contacts."
 
+@input_error
+def search_contact(args, book):
+    require_args(args, 1, "search-contact [name, phone or email]")
+    matches = book.search_contacts(args[0])
+    return "\n".join(str(record) for record in matches) or "No matching contacts found."
 
 @input_error
 def add_birthday(args, book):
@@ -434,8 +462,25 @@ def show_birthday(args, book):
 
 @input_error
 def birthdays(args, book):
-    require_args(args, 0, "birthdays")
-    upcoming = book.get_upcoming_birthdays()
+    if len(args) > 1:
+        return "Usage: birthdays [days]"
+
+    days = None
+
+    if args:
+        if not args[0].isascii() or not args[0].isdecimal():
+            return "Number of days must be a non-negative integer."
+
+        try:
+            days = int(args[0])
+            date.today() + timedelta(days=days)
+        except (ValueError, OverflowError):
+            return "Number of days is too large."
+
+    try:
+        upcoming = book.get_upcoming_birthdays(days)
+    except OverflowError:
+        return "Number of days is too large."
 
     if not upcoming:
         return "No upcoming birthdays."
@@ -444,7 +489,7 @@ def birthdays(args, book):
         f"{item['congratulation_date']} — {item['name']}"
         for item in upcoming
     )
-
+    
 @input_error
 def add_note(args, notebook):
     require_args(args, 1, "add-note [text]")
@@ -563,6 +608,8 @@ def main():
             print(show_phone(args, book))
         elif command == "all":
             print(show_all(args, book))
+        elif command == "search-contact":
+            print(search_contact(args, book))    
         elif command == "add-birthday":
             print(add_birthday(args, book))
         elif command == "show-birthday":
