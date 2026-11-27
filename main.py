@@ -34,6 +34,7 @@ class Phone(Field):
             raise ValueError("Phone number must contain exactly 10 digits.")
         super().__init__(value)
 
+
 class Address(Field):
     def __init__(self, value):
         value = value.strip()
@@ -47,7 +48,10 @@ class Email(Field):
         value = value.strip()
         local_part = r"[a-zA-Z0-9!#$%&'*+/=?^_`{|}~-]+"
         domain_label = r"[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?"
-        pattern = rf"{local_part}(?:\.{local_part})*@{domain_label}(?:\.{domain_label})+"
+        pattern = (
+            rf"{local_part}(?:\.{local_part})*@"
+            rf"{domain_label}(?:\.{domain_label})+"
+        )
         if not re.fullmatch(pattern, value):
             raise ValueError(
                 "Invalid email address. Use a format like anna@example.com."
@@ -138,8 +142,7 @@ class NoteBook:
         if not query:
             raise ValueError("Search text cannot be empty.")
         return [
-            note for note in self.list_notes()
-            if query in note.text.casefold()
+            note for note in self.list_notes() if query in note.text.casefold()
         ]
 
     def search_by_tag(self, tag):
@@ -150,7 +153,11 @@ class NoteBook:
         """Sort by the first tag alphabetically, with untagged notes last."""
         return sorted(
             self.notes.values(),
-            key=lambda note: (not note.tags, min(note.tags, default=""), note.id),
+            key=lambda note: (
+                not note.tags,
+                min(note.tags, default=""),
+                note.id,
+            ),
         )
 
     def delete(self, note_id):
@@ -210,13 +217,15 @@ class Record:
 
     def __str__(self):
         phones = "; ".join(phone.value for phone in self.phones) or "No phones"
-        birthday = str(self.birthday) if self.birthday is not None else "Not set"
+        birthday = (
+            str(self.birthday) if self.birthday is not None else "Not set"
+        )
         address = str(self.address) if self.address is not None else "Not set"
         email = str(self.email) if self.email is not None else "Not set"
         marker = "[Favorite] " if self.favorite else ""
         return (
-            f"{marker}Contact name: {self.name}, phones: {phones}, address: {address}, "
-            f"email: {email}, birthday: {birthday}"
+            f"{marker}Contact name: {self.name}, phones: {phones}, "
+            f"address: {address}, email: {email}, birthday: {birthday}"
         )
 
 
@@ -264,9 +273,7 @@ class AddressBook(UserDict):
 
         for record in self.data.values():
             name_match = query in record.name.value.lower()
-            phone_match = any(
-                query == phone.value for phone in record.phones
-            )
+            phone_match = any(query == phone.value for phone in record.phones)
             email_match = (
                 record.email is not None
                 and query == record.email.value.lower()
@@ -275,7 +282,7 @@ class AddressBook(UserDict):
             if name_match or phone_match or email_match:
                 results.append(record)
 
-        return results    
+        return results
 
     def get_upcoming_birthdays(self, days=None):
         """Find birthdays on a date or in the default seven-day window.
@@ -330,7 +337,9 @@ class AddressBook(UserDict):
         return [
             {
                 "name": name,
-                "congratulation_date": congratulation_date.strftime("%Y.%m.%d"),
+                "congratulation_date": congratulation_date.strftime(
+                    "%Y.%m.%d"
+                ),
                 "birthday_date": next_birthday.strftime("%Y.%m.%d"),
             }
             for congratulation_date, name, next_birthday in upcoming_birthdays
@@ -369,12 +378,14 @@ def load_data():
 
 def input_error(func):
     """Turn a command's validation error into a message for the user."""
+
     @wraps(func)
     def wrapper(args, book):
         try:
             return func(args, book)
         except ValueError as error:
             return str(error)
+
     return wrapper
 
 
@@ -396,7 +407,9 @@ def require_args(args, count, usage):
     command = usage.split(maxsplit=1)[0]
     example = examples.get(command)
     if example:
-        raise ValueError(f"Separate the fields with commas.\nExample: {example}")
+        raise ValueError(
+            f"Separate the fields with commas.\nExample: {example}"
+        )
     raise ValueError(f"Usage: {usage}")
 
 
@@ -531,11 +544,16 @@ def show_all(args, book):
     records = sorted(book.values(), key=lambda record: not record.favorite)
     return "\n".join(str(record) for record in records) or "No contacts."
 
+
 @input_error
 def search_contact(args, book):
     require_args(args, 1, "search-contact [name, phone or email]")
     matches = book.search_contacts(args[0])
-    return "\n".join(str(record) for record in matches) or "No matching contacts found."
+    return (
+        "\n".join(str(record) for record in matches)
+        or "No matching contacts found."
+    )
+
 
 @input_error
 def add_birthday(args, book):
@@ -580,8 +598,7 @@ def birthdays(args, book):
         return "No upcoming birthdays."
 
     return "\n".join(
-        f"{item['congratulation_date']} — {item['name']}"
-        for item in upcoming
+        f"{item['congratulation_date']} — {item['name']}" for item in upcoming
     )
 
 
@@ -618,7 +635,10 @@ def delete_note(args, notebook):
 @input_error
 def list_notes(args, notebook):
     require_args(args, 0, "list-notes")
-    return "\n".join(str(note) for note in notebook.list_notes()) or "No notes yet."
+    return (
+        "\n".join(str(note) for note in notebook.list_notes())
+        or "No notes yet."
+    )
 
 
 @input_error
@@ -664,6 +684,7 @@ def remove_note_quotes(text):
         return text[1:-1]
     return text
 
+
 def parse_input(user_input):
     """Split a CLI command into its name and arguments.
 
@@ -692,7 +713,7 @@ def parse_input(user_input):
             )
         return command, [
             remove_note_quotes(name.strip()),
-            remove_note_quotes(address.strip())
+            remove_note_quotes(address.strip()),
         ]
 
     if command in ("edit-note", "add-tag", "tag-note"):
@@ -743,7 +764,8 @@ def suggest_command(user_input, known_commands):
 
 
 def show_help():
-    print("""
+    print(
+        """
 ========================================================
                   NOVA4LAB ASSISTANT
 ========================================================
@@ -793,7 +815,9 @@ Separate arguments with commas where indicated.
 Double quotation marks are optional.
 
 ========================================================
-""")
+"""
+    )
+
 
 def main():
     try:
