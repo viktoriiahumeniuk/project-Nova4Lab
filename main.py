@@ -149,7 +149,7 @@ class NoteBook:
     def sort_by_tags(self):
         return sorted(
             self.notes.values(),
-            key=lambda note: (not note.tags, sorted(note.tags), note.id),
+            key=lambda note: (not note.tags, min(note.tags, default=""), note.id),
         )
 
     def delete(self, note_id):
@@ -620,7 +620,7 @@ def unpin_note(args, notebook):
 
 @input_error
 def tag_note(args, notebook):
-    require_args(args, 2, "tag-note [id], [tag]")
+    require_args(args, 2, "add-tag [id] [tag]")
     note = notebook.get(args[0])
     note.add_tag(args[1])
     return f"Tag added to note #{note.id}."
@@ -628,7 +628,7 @@ def tag_note(args, notebook):
 
 @input_error
 def search_note_tag(args, notebook):
-    require_args(args, 1, "search-note-tag [tag]")
+    require_args(args, 1, "search-tag [tag]")
     notes = notebook.search_by_tag(args[0])
     return "\n".join(str(note) for note in notes) or "No matching notes."
 
@@ -671,7 +671,7 @@ def parse_input(user_input):
             remove_note_quotes(address.strip())
         ]
 
-    if command in ("edit-note", "tag-note"):
+    if command in ("edit-note", "add-tag", "tag-note"):
         args = re.split(r"\s*,\s*|\s+", text, maxsplit=1)
         return command, [remove_note_quotes(arg) for arg in args]
 
@@ -692,6 +692,31 @@ def parse_input(user_input):
         return command, args
 
     return command, [remove_note_quotes(text)]
+
+
+def suggest_command(user_input, known_commands):
+    """Suggest a command and keep its arguments as entered."""
+    words = user_input.strip().split(maxsplit=1)
+    if not words:
+        return None
+
+    phrase_commands = {
+        "find a contact": "search-contact",
+        "find a note": "search-note",
+        "add a contact": "add-contact",
+        "add a note": "add-note",
+    }
+    phrase = " ".join(user_input.casefold().split())
+    if phrase in phrase_commands:
+        return phrase_commands[phrase]
+
+    matches = get_close_matches(
+        words[0].casefold(), known_commands, n=1, cutoff=0.65
+    )
+    if not matches:
+        return None
+    return " ".join([matches[0], *words[1:]])
+
 
 def show_help():
     print("""
@@ -729,8 +754,8 @@ edit-note id, new_text
 delete-note id
 pin-note id
 unpin-note id
-tag-note id, tag
-search-note-tag tag
+add-tag id tag
+search-tag tag
 sort-notes-by-tag
 
 SYSTEM COMMANDS
@@ -774,18 +799,21 @@ def main():
         "list-notes": (list_notes, notebook),
         "pin-note": (pin_note, notebook),
         "unpin-note": (unpin_note, notebook),
-        "tag-note": (tag_note, notebook),
-        "search-note-tag": (search_note_tag, notebook),
+        "add-tag": (tag_note, notebook),
+        "search-tag": (search_note_tag, notebook),
         "sort-notes-by-tag": (sort_notes_by_tag, notebook),
     }
     known_commands = (*handlers, "hello", "help", "exit", "close")
+    handlers["tag-note"] = handlers["add-tag"]
+    handlers["search-note-tag"] = handlers["search-tag"]
 
     print("Welcome to the Nova4Lab assistant bot!")
     show_help()
 
     while True:
         try:
-            command, args = parse_input(input("Enter a command: "))
+            user_input = input("Enter a command: ")
+            command, args = parse_input(user_input)
         except ValueError as error:
             print(error)
             continue
@@ -814,11 +842,9 @@ def main():
             print(handler(args, collection))
 
         else:
-            suggestion = get_close_matches(
-                command, known_commands, n=1, cutoff=0.65
-            )
+            suggestion = suggest_command(user_input, known_commands)
             if suggestion:
-                print(f"Invalid command. Did you mean '{suggestion[0]}'?")
+                print(f"Invalid command. Did you mean '{suggestion}'?")
             else:
                 print("Invalid command. Type 'help' for available commands.")
 
