@@ -265,7 +265,7 @@ def add_user(args, book):
 
 @input_error
 def add_contact(args, book):
-    require_args(args, 2, "add [name], [phone]")
+    require_args(args, 2, "add-contact [name], [phone]")
     name, phone = args
     name = Name(name).value
     record = book.find(name)
