@@ -33,13 +33,6 @@ class Phone(Field):
 
         super().__init__(value)
 
-class Email(Field):
-    def __init__(self, value):
-        if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", value):
-            raise ValueError("Invalid email address.")
-
-        super().__init__(value)
-
 class Address(Field):
     def __init__(self, value):
         value = value.strip()
@@ -489,7 +482,7 @@ def birthdays(args, book):
         f"{item['congratulation_date']} — {item['name']}"
         for item in upcoming
     )
-    
+
 @input_error
 def add_note(args, notebook):
     require_args(args, 1, "add-note [text]")
