@@ -38,7 +38,7 @@ Invalid input displays an error without stopping the assistant. For a likely typ
 
 ### Browser
 
-Keep `index.html` and `main.py` in the same folder. Start a local server from that folder:
+From the repository root, where `index.html` and the Python modules are located, start a local server:
 
 ```bash
 python3 -m http.server 8000
@@ -48,9 +48,24 @@ Open [http://localhost:8000](http://localhost:8000).
 
 The **Contacts** tab lets you search, edit, favorite, and delete contacts or remove individual phone numbers.
 
-The **Notes** tab lets you search, edit, pin, and delete notes.
+The **Notes** tab lets you create, search, edit, pin, and delete notes. You can also add tags, filter by tag, and sort notes by tag.
 
-An internet connection is needed to load the Pyodide runtime that runs the Python models in the browser.
+The **Birthdays** tab shows upcoming reminders and supports looking up birthdays an exact number of days ahead.
+
+An internet connection is needed to load Pyodide. JavaScript loads the Python modules into Pyodide and sends JSON requests to the Python bridge in `index.html`. The bridge uses the shared Python models and handlers to validate inputs and process requests. JavaScript renders the results and saves browser data in local storage.
+
+## Project structure
+
+| Path | Purpose |
+| --- | --- |
+| `main.py` | CLI entry point and command dispatch |
+| `models.py` | Contacts, birthdays, notes, and field validation |
+| `handlers.py` | Command handlers and shared birthday lookup |
+| `utils.py` | Input parsing, command suggestions, and validation helpers |
+| `menu.py` | CLI help menu |
+| `storage.py` | CLI data loading and saving |
+| `index.html` | Browser interface and JavaScript–Python bridge |
+| `tests/` | Automated tests for contacts, notes, validation, parsing, and storage |
 
 ## CLI command reference
 
@@ -137,17 +152,35 @@ New notes receive unique IDs, including after restarting the assistant.
 
 ### Browser
 
-The browser version saves contacts, favorites, notes, and pins in the current browser's local storage.
+The browser version saves contacts, favorites, notes, tags, and pins in the current browser's local storage.
 
 The browser and CLI have separate data storage.
 
+## Automated tests
+
+From the repository root, run:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+The suite contains 69 tests and uses the Python standard library.
+
 ## Publish the browser version
 
-Once `index.html` and `main.py` are in the root of `main`, open the GitHub repository's **Settings → Pages**.
+Keep `index.html`, `main.py`, `models.py`, `utils.py`, `handlers.py`, `storage.py`, and `menu.py` in the root of `main`. Open the GitHub repository's **Settings → Pages**.
 
 Choose **Deploy from a branch**, then **main** and **/(root)**.
 
 Save and open the URL shown by GitHub Pages.
+
+## Team Members & Contributions
+
+- **Viktoriia Humeniuk (`viktoriiahumeniuk`)** (Team Lead) built the original CLI assistant, including the address book, phone and birthday validation, weekend-adjusted birthday reminders, and contact persistence. She added address and email fields, contact renaming and deletion, and the original note creation, editing, search, and deletion commands. She also implemented contact favorites, individual phone removal, note listing and pinning, and the Pyodide browser interface with local storage. Later updates added a browser birthday view and brought the CLI’s contact search and note-tag features into the browser. [Starter CLI](https://github.com/viktoriiahumeniuk/project-Nova4Lab/pull/1) · [Contact management](https://github.com/viktoriiahumeniuk/project-Nova4Lab/pull/3) · [Notes](https://github.com/viktoriiahumeniuk/project-Nova4Lab/pull/4) · [Browser interface](https://github.com/viktoriiahumeniuk/project-Nova4Lab/pull/5) · [Browser updates](https://github.com/viktoriiahumeniuk/project-Nova4Lab/pull/8)
+- **Dmytro Stasyuk (`dimastasyuk`)** (Scrum Master) implemented CLI contact search by partial name or exact phone number or email address. He extended birthday lookup to support an exact day offset while retaining the default seven-day window. He expanded CLI persistence to save and restore contacts and notes together, including note IDs and the next available ID, in `~/.nova4lab/data.pkl`. He also added the startup and `help` menus, improved handling of quoted command arguments, saved data on Ctrl+C and end-of-file, and expanded the README’s command and storage documentation. [Contact search and birthday lookup](https://github.com/viktoriiahumeniuk/project-Nova4Lab/commit/7c6ac8d) · [Persistence, CLI help, and documentation](https://github.com/viktoriiahumeniuk/project-Nova4Lab/commit/c35c42a)
+- **`embarcaderestudio-wq`** (Developer) implemented CLI note tagging, case-insensitive tag search, and sorting by tag, with support for notes saved before tags were introduced. They refactored CLI command dispatch into a handler table and added suggestions for mistyped commands. They then expanded suggestions to recognize phrases such as `find a contact` and preserve arguments when suggesting a typo correction. They also documented the tag commands in the README. [Note tags and initial suggestions](https://github.com/viktoriiahumeniuk/project-Nova4Lab/commit/0428f36) · [Command and suggestion refinements](https://github.com/viktoriiahumeniuk/project-Nova4Lab/commit/83ba018)
+
+The contribution summaries are based on Git history.
 
 ## Team workflow
 
