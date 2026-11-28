@@ -206,6 +206,10 @@
 <script type="text/plain" id="python-bridge">
 import json
 
+from models import Record, AddressBook, Note, NoteBook, normalize_note_tag
+from utils import get_record
+from handlers import birthday_results
+
 if "NoteBook" not in globals():
     raise RuntimeError("This version of main.py does not include NoteBook yet.")
 
@@ -604,16 +608,31 @@ for (const tab of ["contacts", "notes", "birthdays"]) {
   });
 }
 
+
 window.addEventListener("DOMContentLoaded", async () => {
   try {
-    const response = await fetch("./main.py");
-    if (!response.ok) {
-      throw new Error("Place index.html and main.py in the same published folder.");
+    const runtime = await loadPyodide();
+
+    const modules = [
+      "models.py",
+      "utils.py",
+      "handlers.py",
+      "storage.py",
+      "menu.py",
+      "main.py",
+    ];
+
+    for (const module of modules) {
+      const response = await fetch("./" + module);
+
+      if (!response.ok) {
+        throw new Error("Could not load " + module);
+      }
+
+      runtime.FS.writeFile(module, await response.text());
     }
 
-    const runtime = await loadPyodide();
     runtime.globals.set("__name__", "nova_lab_cli");
-    runtime.runPython(await response.text());
     runtime.runPython(get("python-bridge").textContent);
     request = runtime.globals.get("web_request");
 
@@ -638,6 +657,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     get("status").textContent = "Could not open the assistant. " + message;
   }
 });
+
 </script>
 </body>
 </html>
